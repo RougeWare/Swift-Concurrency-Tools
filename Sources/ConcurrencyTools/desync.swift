@@ -29,7 +29,7 @@ public func desync<Value>(task: @escaping @Sendable () async throws -> Value, ca
 
 
 
-public extension Task {
+public extension Task where Failure == any Error {
     /// Asynchronously runs the given task, then calls `callback` on that thread, and returns the result via the given `callback`. "De-synchronizes" the given async task.
     ///
     /// This returns immediately. Since `callback` is called on an arbitrary thread, you might want to process it on a separate thread using `onMainActor(do:)` or similar
@@ -37,7 +37,7 @@ public extension Task {
     /// - Parameters:
     ///   - task:     The task to run on a separate thread
     ///   - callback: Passed the return value of `task` after it completes, on the same thread upon which `task` was run
-    static func desync(_ task: @escaping @Sendable () async throws -> Success, callback: @escaping (Result<Value, Failure> -> Void) {
+    static func desync(_ task: @escaping @Sendable () async throws -> Success, callback: @escaping (Result<Success, Failure>) -> Void) {
         ConcurrencyTools.desync(task: task, callback: callback)
     }
 }
