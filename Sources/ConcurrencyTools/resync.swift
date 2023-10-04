@@ -9,6 +9,7 @@ import Foundation
 
 import OptionalTools
 import SafePointer
+import SimpleLogging
 
 
 
@@ -26,37 +27,48 @@ throws -> Value {
     
     let result = MutableSafePointer<Optional<Result<Value, Error>>>(to: .none)
     
+    log(verbose: "\(counter)t • 1: Creating task")
     Task.detached(priority: .high) {
-        defer {
-            semaphore.signal()
-        }
+        log(verbose: "\(counter)t • 3: Running task")
         
         do {
+            log(verbose: "\(counter)t • 4: Calculating...")
             result.pointee = .some(.success(try await asyncFunction()))
+            log(verbose: "\(counter)t • 5: Calculated!")
         }
         catch {
+            log(warning: "\(counter)t • 5: Calculation threw an error")
             result.pointee = .failure(error)
         }
+        
+        log(verbose: "\(counter)t • 6: Signaling...")
+        let signal = semaphore.signal()
+        log(verbose: "\(counter)t • 7: Signaled \(signal)")
     }
     
+    log(verbose: "\(counter)t • 2: Waiting...")
     if let timeout {
         let timeoutResult = semaphore.wait(timeout: timeout)
         
         switch timeoutResult {
         case .success:
-            break
+            log(verbose: "\(counter)t • 8: Done waiting")
             
         case .timedOut:
+            log(error: "\(counter)t • 8: Waited too long")
             throw TaskNeverExecutedError()
         }
     }
     else {
         semaphore.wait()
+        log(verbose: "\(counter)t • 8: Done waiting")
     }
     
     return try result.pointee.unwrappedOrThrow(error: TaskNeverExecutedError()).get()
 }
 
+
+private var counter = Int()
 
 /// Converts the given `async` function to a synchronous function.
 ///
@@ -69,15 +81,24 @@ public func resync<Value>(_ asyncFunction: @escaping () async -> Value) -> Value
     
     let result = MutableSafePointer<Optional<Value>>(to: .none)
     
+    counter += 1
+    
+    log(verbose: "\(counter) • 1: Creating task")
     Task.detached(priority: .high) {
-        defer {
-            semaphore.signal()
-        }
+        log(verbose: "\(counter) • 3: Running task")
         
+        log(verbose: "\(counter) • 4: Calculating...")
         result.pointee = .some(await asyncFunction())
+        log(verbose: "\(counter) • 5: Calculated!")
+        
+        log(verbose: "\(counter) • 6: Signaling...")
+        let signal = semaphore.signal()
+        log(verbose: "\(counter) • 7: Signaled \(signal)")
     }
     
+    log(verbose: "\(counter) • 2: Waiting...")
     semaphore.wait()
+    log(verbose: "\(counter) • 8: Done waiting")
     
     // Okay, so.
     // We generally do not use exclamation points in code. In fact, Our own style guide even says to not use them!
