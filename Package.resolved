@@ -1,6 +1,15 @@
 {
   "pins" : [
     {
+      "identity" : "swift-function-tools",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RougeWare/Swift-Function-Tools.git",
+      "state" : {
+        "branch" : "feature/structured-concurrency",
+        "revision" : "0624bcb264233432fa115e6a900d096d0b0ad7ff"
+      }
+    },
+    {
       "identity" : "swift-optional-tools",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RougeWare/Swift-Optional-Tools.git",
