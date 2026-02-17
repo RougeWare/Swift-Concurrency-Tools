@@ -7,6 +7,9 @@
 
 import XCTest
 import ConcurrencyTools
+import SafePointer
+
+
 
 final class Task_sugar_Ttests: XCTestCase {
 
@@ -14,16 +17,16 @@ final class Task_sugar_Ttests: XCTestCase {
         
         let sleepSeconds = TimeInterval.random(in: 2 ..< 4)
         
-        var before = Date()
-        var after = Date()
+        let before = MutableSafePointer(to: Date.distantPast)
+        let after = MutableSafePointer(to: Date.distantFuture)
         
         try resync {
-            before = Date()
+            before.pointee = Date()
             try await Task.sleep(seconds: sleepSeconds)
-            after = Date()
+            after.pointee = Date()
         }
         
-        XCTAssertEqual(after.timeIntervalSince(before), sleepSeconds,
+        XCTAssertEqual(after.pointee.timeIntervalSince(before.pointee), sleepSeconds,
                        accuracy: 1)
     }
 }

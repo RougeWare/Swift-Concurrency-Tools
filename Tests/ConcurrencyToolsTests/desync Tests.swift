@@ -7,6 +7,9 @@
 
 import XCTest
 import ConcurrencyTools
+import SafePointer
+
+
 
 final class desync_Tests: XCTestCase {
 
@@ -16,12 +19,12 @@ final class desync_Tests: XCTestCase {
         
         let semaphore = DispatchSemaphore.default
         
-        var didFinishDesyncCallback = false
+        let didFinishDesyncCallback = MutableSafePointer(to: false)
         
         desync(task: TestActor.default.int) { result in
             defer {
                 semaphore.signal()
-                didFinishDesyncCallback = true
+                didFinishDesyncCallback.pointee = true
             }
             
             switch result {
@@ -42,8 +45,12 @@ final class desync_Tests: XCTestCase {
             XCTFail("desync didn't finish in time")
         }
         
-        if !didFinishDesyncCallback {
+        if !didFinishDesyncCallback.pointee {
             XCTFail("desync never reached end of callback block")
         }
     }
 }
+
+
+
+extension MutableSafePointer: @retroactive @unchecked Sendable {}
