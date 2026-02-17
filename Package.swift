@@ -1,4 +1,4 @@
-// swift-tools-version: 5.7
+// swift-tools-version: 6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -19,6 +19,7 @@ let package = Package(
         // Dependencies declare other packages that this package depends on.
         .package(url: "https://github.com/RougeWare/Swift-Optional-Tools.git", .upToNextMajor(from: "1.1.3")),
         .package(url: "https://github.com/RougeWare/Swift-Safe-Pointer.git", .upToNextMajor(from: "2.1.3")),
+        .package(url: "https://github.com/RougeWare/Swift-Function-Tools.git", .upToNextMajor(from: "1.2.4")),
     ],
     targets: [
         // Targets are the basic buildsing blocks of a package. A target can define a module or a test suite.
@@ -28,6 +29,7 @@ let package = Package(
             dependencies: [
                 .product(name: "OptionalTools", package: "Swift-Optional-Tools"),
                 .product(name: "SafePointer", package: "Swift-Safe-Pointer"),
+                .product(name: "FunctionTools", package: "Swift-Function-Tools"),
             ]),
         .testTarget(
             name: "ConcurrencyToolsTests",
