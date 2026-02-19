@@ -67,6 +67,8 @@ where Value: Sendable,
     public typealias LoadingState = ConcurrencyTools.FailableLoadingState<Value, Failure>
     public typealias Get = @Sendable () async throws(Failure) -> Value
     public typealias Set = @Sendable (Value) async throws(Failure) -> Void
+    public typealias ThrowingSetWrappedValue<Thrown: Error> = @Sendable (inout Value) async throws(UpdateSetterError<Thrown>) -> Void
+    public typealias SetWrappedValue = @Sendable (inout Value) async -> Void
     public typealias Subject = CurrentValueSubject<LoadingState, Never>
     
     
@@ -168,7 +170,7 @@ public extension ThrowingAsyncBinding {
 public extension ThrowingAsyncBinding {
     nonmutating func setWrappedValue<Thrown: Error>(
         throwing _: Thrown.Type = Thrown.self,
-        throwingSetter: (inout Value) async throws(UpdateSetterError<Thrown>) -> Void,
+        throwingSetter: ThrowingSetWrappedValue<Thrown>,
         onFailure: (Failure) -> Void)
     async throws(Thrown) {
         var copy: Value
@@ -199,7 +201,7 @@ public extension ThrowingAsyncBinding {
     
     nonmutating func setWrappedValue<Thrown: Error>(
         throwing _: Thrown.Type = Thrown.self,
-        throwingSetter: (inout Value) async throws(UpdateSetterError<Thrown>) -> Void)
+        throwingSetter: ThrowingSetWrappedValue<Thrown>)
     async throws(Thrown) {
         try await setWrappedValue(
             throwing: Thrown.self,
@@ -208,7 +210,7 @@ public extension ThrowingAsyncBinding {
     }
     
     
-    nonmutating func setWrappedValue(setter: (inout Value) async -> Void, onFailure: (Failure) -> Void) async {
+    nonmutating func setWrappedValue(setter: SetWrappedValue, onFailure: (Failure) -> Void) async {
         var copy: Value
         
         do {
@@ -224,7 +226,7 @@ public extension ThrowingAsyncBinding {
     }
     
     
-    nonmutating func setWrappedValue(setter: (inout Value) async -> Void) async {
+    nonmutating func setWrappedValue(setter: SetWrappedValue) async {
         await setWrappedValue(setter: setter, onFailure: update(toFailure:))
     }
     
