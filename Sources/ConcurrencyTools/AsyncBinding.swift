@@ -120,7 +120,6 @@ public extension ThrowingAsyncBinding {
     ///
     /// - Returns: The bound value
     /// - Throws: Any error that occurred trying to get the bound value
-    @MainActor
     var wrappedValue: Value {
         get async throws(Failure) {
             // If we already have a terminal state, return it immediately
