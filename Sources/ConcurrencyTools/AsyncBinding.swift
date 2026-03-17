@@ -1,8 +1,9 @@
 //
 //  AsyncBinding.swift
-//  Generic App HOSTESS Testbed
+//  ConcurrencyTools
 //
 //  Created by Ky on 2026-01-24.
+//  Parts of this file were made by Ky directing Claude 4.6 Sonnet.
 //
 
 @preconcurrency import Combine
@@ -13,47 +14,9 @@ import FunctionTools
 
 
 
-// MARK: - ThrowingAsyncLazy
-
-/// A `Lazy` implementation where the value generator acts asynchronously and might throw a failure
-@available(macOS 12, *)
-@available(iOS 15, *)
-public struct ThrowingAsyncLazy<Value, Failure>: Sendable
-where Value: Sendable,
-      Failure: Error & Sendable
-{
-    public typealias Result = ThrowingAsyncBinding<Value, Failure>.Result
-    public typealias LoadingState = ThrowingAsyncBinding<Value, Failure>.LoadingState
-    public typealias Get = ThrowingAsyncBinding<Value, Failure>.Get
-    
-    
-    
-    private var storage: ThrowingAsyncBinding<Value, Failure>
-    
-    
-    public init(initialState: LoadingState = .notStarted,
-                get: @escaping Get) {
-        self.storage = .init(initialState: initialState, get: get, set: null)
-    }
-    
-    
-    
-    public init(_ initialValue: Value) {
-        self.storage = .init(initialValue)
-    }
-    
-    
-    
-    public var wrappedValue: Value {
-        get async throws(Failure) {
-            try await storage.wrappedValue
-        }
-    }
-}
-
-
-
 // MARK: - ThrowingAsyncBinding
+
+// This is the "base class". `AsyncBinding`, `ThrowingAsyncLazy`, and `AsyncLazy` are all thin wrappers around `ThrowingAsyncBinding`.
 
 /// A `Binding` implementation where the value getter/setter act asynchronously and might throw a failure
 @available(macOS 12, *)
@@ -74,8 +37,11 @@ where Value: Sendable,
     
     
     private let subject: Subject
+    
     @MutableSafePointer
     private var valueGenerator: ValueGenerator
+    
+    private let mutex = Mutex()
     
     
     private init(subject: Subject, valueGenerator: ValueGenerator) {
@@ -101,7 +67,7 @@ where Value: Sendable,
     
     
     public init(_ initialValue: @escaping Get) {
-        self.init(subject: Subject(.loading),
+        self.init(subject: Subject(.notStarted),
                   valueGenerator: ._generateThenStore(generator: initialValue))
     }
 }
@@ -122,16 +88,15 @@ public extension ThrowingAsyncBinding {
     /// - Throws: Any error that occurred trying to get the bound value
     var wrappedValue: Value {
         get async throws(Failure) {
-            // If we already have a terminal state, return it immediately
             switch loadingState {
+            // If we already have a terminal state, return it immediately
             case let .success(value):
                 return value
-                
             case let .failure(error):
                 throw error
                 
+            // Otherwise wait for a terminal state
             case .notStarted, .loading:
-                // Otherwise wait for a terminal state
                 for await state in subject.values {
                     switch state {
                     case .notStarted, .loading:
@@ -154,8 +119,19 @@ public extension ThrowingAsyncBinding {
     }
     
     
+    /// The current state of loading this binding.
+    ///
+    /// This automatically starts loading if it's not yet started. If you need to peek at the current state without starting to load it, call ``peekLoadingState``
     var loadingState: LoadingState {
         startLoading()
+        return peekLoadingState
+    }
+    
+    
+    /// The current state of loading this binding.
+    ///
+    /// This just exposes the current state, without changing anything. While useful, ``ThrowingAsyncBinding`` prefers to semantically appear as if it contains the bound value as-needed, so ``loadingState`` is preferred. Only use this when your internal implementation details require that you don't modify whatever state this instance contains
+    var peekLoadingState: LoadingState {
         return subject.value
     }
 }
@@ -167,37 +143,68 @@ public extension ThrowingAsyncBinding {
 @available(macOS 12, *)
 @available(iOS 15, *)
 public extension ThrowingAsyncBinding {
+    
+    /// Mutates the currently-held value, or performs some action if there is no such value but instead a failure.
+    ///
+    /// - Parameters:
+    ///   - setter:    This function takes in the current value and mutates it to a new value, which is saved after this `setter` function returns.
+    ///                If this `setter` function throws an error, that error is re-thrown from this `setWrappedValue` function and the wrapped value is unaffected.
+    ///   - onFailure: _optional_ - Called if a previous attempt to initialize/set the wrapped value failed, meaning there's no value to send to the setter to be mutated.
+    ///                If you already have a value and you want to just set the current wrapped value to that, simply pass that value to ``setWrappedValue(_:)``.
+    ///                Defaults to a no-op.
     nonmutating func setWrappedValue<Thrown: Error>(
         throwing _: Thrown.Type = Thrown.self,
         throwingSetter: ThrowingSetWrappedValue<Thrown>,
         onFailure: (Failure) -> Void)
     async throws(Thrown) {
-        var copy: Value
+        // Phase 1: wait for a terminal state outside the mutex.
+        // Holding the mutex here would deadlock against initialize_().
+        do { _ = try await self.wrappedValue }
+        catch { return onFailure(error) }
         
-        do {
-            copy = try await self.wrappedValue
-        }
-        catch {
-            return onFailure(error)
-        }
         
-        do {
-            try await throwingSetter(&copy)
-        }
-        catch let error {
-            switch error {
-            case .setBinding(let failure):
-                self.update(toFailure: failure)
-                
-            case .propagate(let error):
-                throw error
+        @Sendable
+        func generateOutcome() async -> Swift.Result<Void, Thrown> {
+            guard case .success(var current) = peekLoadingState else {
+                // A concurrent setter or failure landed between phases. Respect it.
+                return .success(())
+            }
+            do {
+                try await throwingSetter(&current)
+                update(toValue: current)
+                return .success(())
+            }
+            catch {
+                switch error {
+                case .setBinding(let failure):
+                    update(toFailure: failure)
+                    return .success(()) // handled internally, don't propagate
+                case .propagate(let thrown):
+                    return .failure(thrown)
+                }
             }
         }
         
-        self.update(toValue: copy)
+        
+        // Phase 2: atomic read-modify-write inside the mutex.
+        // .propagate errors are smuggled out via Result rather than thrown
+        // directly, since we can't use typed-throws inside the mutex body.
+        let outcome = await mutex.run {
+            await generateOutcome()
+        }
+        
+        _ = try outcome.get()
     }
     
     
+    /// Mutates the currently-held value, or performs some action if there is no such value but instead a failure.
+    ///
+    /// - Parameters:
+    ///   - setter:    This function takes in the current value and mutates it to a new value, which is saved after this `setter` function returns.
+    ///                If this `setter` function throws an error, that error is re-thrown from this `setWrappedValue` function and the wrapped value is unaffected.
+    ///   - onFailure: _optional_ - Called if a previous attempt to initialize/set the wrapped value failed, meaning there's no value to send to the setter to be mutated.
+    ///                If you already have a value and you want to just set the current wrapped value to that, simply pass that value to ``setWrappedValue(_:)``.
+    ///                Defaults to a no-op.
     nonmutating func setWrappedValue<Thrown: Error>(
         throwing _: Thrown.Type = Thrown.self,
         throwingSetter: ThrowingSetWrappedValue<Thrown>)
@@ -209,29 +216,66 @@ public extension ThrowingAsyncBinding {
     }
     
     
-    nonmutating func setWrappedValue(setter: SetWrappedValue, onFailure: (Failure) -> Void) async {
-        var copy: Value
-        
-        do {
-            copy = try await self.wrappedValue
+    /// Mutates the currently-held value, or performs some action if there is no such value but instead a failure.
+    ///
+    /// - Parameters:
+    ///   - setter:    This function takes in the current value and mutates it to a new value, which is saved after this `setter` function returns
+    ///   - onFailure: _optional_ - Called if a previous attempt to initialize/set the wrapped value failed, meaning there's no value to send to the setter to be mutated.
+    ///                If you already have a value and you want to just set the current wrapped value to that, simply pass that value to ``setWrappedValue(_:)``.
+    ///                Defaults to a no-op.
+    nonmutating func setWrappedValue(setter: SetWrappedValue, onFailure: (Failure) -> Void)  async {
+        // Phase 1 — wait for a terminal state, outside the mutex.
+        //
+        // We must not hold the mutex here: if the binding hasn't loaded yet,
+        // `initialize(_:)` needs the mutex to complete, and holding it while
+        // waiting for that completion would deadlock.
+        //
+        // We don't use the value from this call directly, because a concurrent
+        // setter may change it before we enter the critical section below.
+        do { _ = try await self.wrappedValue }
+        catch { return onFailure(error) }
+
+        // Phase 2 — atomic read-modify-write, inside the mutex.
+        //
+        // Re-reading `subject.value` here (rather than using the snapshot from
+        // phase 1) ensures we operate on the most current value, regardless of
+        // what concurrent setters did while we were waiting. No call to
+        // `wrappedValue` here — that would risk re-entering the mutex or
+        // triggering a load.
+        await mutex.run {
+            switch peekLoadingState {
+            case .success(var current):
+                await setter(&current)
+                update(toValue: current)
+            
+            case .notStarted, .loading, .failure(_):
+                return
+            }
         }
-        catch {
-            return onFailure(error)
-        }
-        
-        await setter(&copy)
-        
-        self.update(toValue: copy)
     }
     
     
+    /// Mutates the currently-held value, or performs some action if there is no such value but instead a failure.
+    ///
+    /// - Parameters:
+    ///   - setter:    This function takes in the current value and mutates it to a new value, which is saved after this `setter` function returns
+    ///   - onFailure: _optional_ - Called if a previous attempt to initialize/set the wrapped value failed, meaning there's no value to send to the setter to be mutated.
+    ///                If you already have a value and you want to just set the current wrapped value to that, simply pass that value to ``ThrowingAsyncBinding/setWrappedValue(_:)``.
+    ///                Defaults to a no-op.
     nonmutating func setWrappedValue(setter: SetWrappedValue) async {
-        await setWrappedValue(setter: setter, onFailure: update(toFailure:))
+        await setWrappedValue(setter: setter, onFailure: null)
     }
     
     
-    nonmutating func setWrappedValue(_ newValue: Value) {
-        update(toValue: newValue)
+    /// Immediately changes the currently-held value/failure/progress to the given success value.
+    ///
+    /// If you want to interactively mutate the value in this binding or respond to a current failure state, use ``setWrappedValue(setter:onFailure:)`` or ``setWrappedValue(throwing:throwingSetter:onFailure:)``
+    ///
+    /// - Parameter newValue: The new value to immediately update this binding to hold
+    nonmutating func setWrappedValue(_ newValue: Value) async {
+        await mutex.run {
+            update(toValue: newValue)
+        }
     }
     
     
@@ -263,23 +307,37 @@ private extension ThrowingAsyncBinding {
             return
             
         case .notStarted:
-            update(generateValue)
+            subject.send(.loading)
+            Task {
+                await initialize_(generateValue)
+            }
         }
     }
     
     
-    private func update(_ block: @escaping Get) {
-        subject.send(.loading)
-        Task {
+    private func initialize_(_ block: @escaping Get) async {
+        @Sendable func _initialize(_ block: @escaping Get) async {
+            // If a concurrent update already resolved us while we were queued,
+            // there's nothing left to do. This makes startLoading() safe to
+            // call from multiple concurrent contexts.
+            switch subject.value {
+            case .success, .failure:
+                return
+            case .notStarted, .loading:
+                break
+            }
+            
+            subject.send(.loading)
             do {
                 update(toValue: try await block())
-            }
-            catch let error as Failure {
+            } catch {
                 update(toFailure: error)
             }
-            catch {
-                preconditionFailure("The compiler should always ensure that thrown errors here are `Failure`s")
-            }
+        }
+        
+        
+        await mutex.run {
+            await _initialize(block)
         }
     }
     
@@ -328,6 +386,46 @@ private extension ThrowingAsyncBinding {
         
         /// The value is dynamically fetched & written using the given `getter` and `setter` functions
         case dynamic(getter: Get, setter: Set)
+    }
+}
+
+
+
+// MARK: - ThrowingAsyncLazy
+
+/// A `Lazy` implementation where the value generator acts asynchronously and might throw a failure
+@available(macOS 12, *)
+@available(iOS 15, *)
+public struct ThrowingAsyncLazy<Value, Failure>: Sendable
+where Value: Sendable,
+      Failure: Error & Sendable
+{
+    public typealias Result = ThrowingAsyncBinding<Value, Failure>.Result
+    public typealias LoadingState = ThrowingAsyncBinding<Value, Failure>.LoadingState
+    public typealias Get = ThrowingAsyncBinding<Value, Failure>.Get
+    
+    
+    
+    private var storage: ThrowingAsyncBinding<Value, Failure>
+    
+    
+    public init(initialState: LoadingState = .notStarted,
+                get: @escaping Get) {
+        self.storage = .init(initialState: initialState, get: get, set: null)
+    }
+    
+    
+    
+    public init(_ initialValue: Value) {
+        self.storage = .init(initialValue)
+    }
+    
+    
+    
+    public var wrappedValue: Value {
+        get async throws(Failure) {
+            try await storage.wrappedValue
+        }
     }
 }
 

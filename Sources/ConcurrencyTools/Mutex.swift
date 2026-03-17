@@ -3,7 +3,7 @@
 //  Mutex.swift
 //  ConcurrencyTools
 //
-//  Created by Ky on 2026-02-24.
+//  Created by Ky directing Claude 4.6 Sonnet on 2026-02-24.
 //
 
 import Foundation

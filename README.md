@@ -83,3 +83,14 @@ Task {
     testCondition()
 }
 ```
+
+
+
+## On the use of LLMs
+
+The following LLMs were directed to assist with some parts of this package:
+- Claude 4.5 Sonnet
+- Claude 4.6 Sonnet
+- GPT-OSS
+
+These LLMs were never given direct access to the files in this package. They were directed elsewhere, and their responses were used to inform how this package was written. All code was critically inspected & reviewed by the package maintainers, regardless of how that code was written.

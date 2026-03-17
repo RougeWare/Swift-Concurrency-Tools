@@ -61,5 +61,5 @@ actor TestActor {
 extension TestActor {
     static var `default` = TestActor()
     
-    static let defaultSleepTime: TimeInterval = 2
+    static var defaultSleepTime: TimeInterval { .random(in: 0.5...2) }
 }

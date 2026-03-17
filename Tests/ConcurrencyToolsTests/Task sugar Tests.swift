@@ -10,6 +10,8 @@ import ConcurrencyTools
 
 final class Task_sugar_Ttests: XCTestCase {
 
+    @available(macOS, deprecated: 13, obsoleted: 28)
+    @available(iOS, deprecated: 16, obsoleted: 28)
     func testSleep_seconds() throws {
         
         let sleepSeconds = TimeInterval.random(in: 2 ..< 4)
