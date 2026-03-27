@@ -5,8 +5,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/RougeWare/Swift-Function-Tools.git",
       "state" : {
-        "branch" : "feature/structured-concurrency",
-        "revision" : "0624bcb264233432fa115e6a900d096d0b0ad7ff"
+        "revision" : "0cc2083f05dc12fa70451985c0c3390e63b468ed",
+        "version" : "2.0.0"
       }
     },
     {

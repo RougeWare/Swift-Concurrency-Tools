@@ -20,9 +20,9 @@ let package = Package(
     
     dependencies: [
         // Dependencies declare other packages that this package depends on.
-        .package(url: "https://github.com/RougeWare/Swift-Optional-Tools.git", .upToNextMajor(from: "1.1.3")),
-        .package(url: "https://github.com/RougeWare/Swift-Safe-Pointer.git", .upToNextMajor(from: "2.1.3")),
-        .package(url: "https://github.com/RougeWare/Swift-Function-Tools.git", branch: "feature/structured-concurrency"),
+        .package(url: "https://github.com/RougeWare/Swift-Optional-Tools.git", from: "1.1.3"),
+        .package(url: "https://github.com/RougeWare/Swift-Safe-Pointer.git", from: "2.1.3"),
+        .package(url: "https://github.com/RougeWare/Swift-Function-Tools.git", from: "2.0.0"),
     ],
     
     targets: [
