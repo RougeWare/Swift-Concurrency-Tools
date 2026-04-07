@@ -11,13 +11,25 @@ import Foundation
 
 /// Controls a suspension point in a test, allowing one task to park and another to release it at a precise moment.
 ///
-/// Used to manufacture deterministic interleaving in concurrency tests without relying on sleep-based timing
+/// Used to manufacture deterministic interleaving in concurrency tests without relying on sleep-based timing. You can think of this as a limited version of a semaphore
+///
+/// ```swift
+/// let gate = Gate()
+///
+/// Task {
+///     await doLotsOfWork()
+///     gate.resume()
+/// }
+///
+/// await gate.suspend()
+/// ```
 public actor Gate {
     
     /// Stores the continuation created in ``suspend()``
     private var stored: CheckedContinuation<Void, Never>?
     
     
+    /// Create a new gate
     public init() {}
 }
 

@@ -693,6 +693,9 @@ struct AsyncBindingTests {
         }
         #expect(value == 99)
     }
+    
+    
+    // TODO: AsyncBinding.init(get:set:)
 }
 
 

@@ -58,8 +58,8 @@ public actor Mutex<Value: Sendable> {
 public extension Mutex {
     
     /// The body of a mutex access run, which takes in the value the mutex holds, possibly mutates it, and possibly returns some value
-    typealias InoutBody<Result> = @Sendable (inout Value) throws -> Result
-    typealias OutBody<Result> = @Sendable () async throws -> Result
+    typealias InoutBody<Result, Thrown: Error> = @Sendable (inout Value) throws(Thrown) -> Result
+    typealias OutBody<Result, Thrown: Error> = @Sendable () async throws(Thrown) -> Result
     
     
     
@@ -77,7 +77,7 @@ public extension Mutex {
     /// - Returns: Whatever `body` returns.
     /// - Throws: Re-throws any error thrown by `body`. The lock is always released, even when an error occurs.
     @discardableResult
-    func run<Result: Sendable>(_ body: InoutBody<Result>) async rethrows -> Result {
+    func run<Result: Sendable, Thrown: Error>(_ body: InoutBody<Result, Thrown>) async throws(Thrown) -> Result {
         await acquire()          // wait here if others are queued
         defer { release() }      // always release the "lock", even if `body` throws
         return try body(&value)
@@ -96,7 +96,7 @@ public extension Mutex {
     /// - Returns: Whatever `body` returns.
     /// - Throws: Re-throws any error thrown by `body`. The lock is always released, even when an error occurs.
     @discardableResult
-    func run<Result: Sendable>(_ body: OutBody<Result>) async rethrows -> Result {
+    func run<Result: Sendable, Thrown: Error>(_ body: OutBody<Result, Thrown>) async throws(Thrown) -> Result {
         await acquire()          // wait here if others are queued
         defer { release() }      // always release the "lock", even if `body` throws
         return try await body()
