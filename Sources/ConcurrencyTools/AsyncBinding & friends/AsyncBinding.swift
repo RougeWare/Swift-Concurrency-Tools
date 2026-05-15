@@ -103,6 +103,7 @@ public extension AsyncBinding {
             switch result {
             case .success(var value):
                 await setter(&value)
+                result = .success(value)
                 
             case .failure(let error):
                 preconditionFailure("Impossible error thrown: \(error)")
