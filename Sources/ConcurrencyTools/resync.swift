@@ -8,7 +8,7 @@
 import Foundation
 
 import OptionalTools
-import SafePointer
+@preconcurrency import SafePointer
 
 
 
@@ -20,7 +20,7 @@ import SafePointer
 ///   - timeout:      _optional_ - How long to wait for the async function to complete before giving up. `nil` signifies to wait forever. Defaults to `nil`
 ///   - asyncFunction: The function to convert into a synchronous one
 public func resync<Value>(timeout: DispatchTime? = nil,
-                          _ asyncFunction: @escaping () async throws -> Value)
+                          _ asyncFunction: @escaping @Sendable () async throws -> Value)
 throws -> Value {
     let semaphore = DispatchSemaphore.default
     
@@ -64,7 +64,7 @@ throws -> Value {
 ///
 /// - Parameters:
 ///   - asyncFunction: The function to convert into a synchronous one
-public func resync<Value>(_ asyncFunction: @escaping () async -> Value) -> Value {
+public func resync<Value>(_ asyncFunction: @escaping @Sendable () async -> Value) -> Value {
     let semaphore = DispatchSemaphore.default
     
     let result = MutableSafePointer<Optional<Value>>(to: .none)

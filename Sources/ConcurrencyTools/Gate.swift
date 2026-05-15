@@ -11,13 +11,13 @@ import Foundation
 
 /// Controls a suspension point in a test, allowing one task to park and another to release it at a precise moment.
 ///
-/// Used to manufacture deterministic interleaving in concurrency tests without relying on sleep-based timing. You can think of this as a limited version of a semaphore
+/// Use this to manufacture deterministic interleaving in concurrency tests without relying on sleep-based timing.
 ///
 /// ```swift
 /// let gate = Gate()
 ///
 /// Task {
-///     await doLotsOfWork()
+///     await doWork()
 ///     gate.resume()
 /// }
 ///
@@ -25,12 +25,23 @@ import Foundation
 /// ```
 public actor Gate {
     
-    /// Stores the continuation created in ``suspend()``
-    private var stored: CheckedContinuation<Void, Never>?
+    /// ``resume()`` calls that arrived before a matching ``suspend()``,
+    /// banked so the next suspend returns immediately rather than parking.
+    private var credits = 0
+    
+    /// Tasks parked by ``suspend()``, in arrival order.
+    private var waiters: [CheckedContinuation<Void, Never>] = []
     
     
-    /// Create a new gate
+    /// Prepare a new gate.
+    ///
+    /// Creation alone doesn't do anything; tou have to use the other methods to operate a gate.
     public init() {}
+    
+    
+    isolated deinit {
+        while resume() {}
+    }
 }
 
 
@@ -41,13 +52,26 @@ public extension Gate {
     
     /// Suspends the caller here until ``resume()`` is called from elsewhere
     func suspend() async {
-        await withCheckedContinuation { stored = $0 }
+        if 0 < credits {
+            credits -= 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
     }
     
     
     /// Releases whatever task is parked by ``suspend()``
-    func resume() {
-        stored?.resume()
-        stored = nil
+    ///
+    /// - Returns: _optional_ - `true` iff all `wait()` calls are resumed when this returns. `false` otherwise.
+    @discardableResult
+    func resume() -> Bool {
+        if let first = waiters.popFirst() {
+            first.resume()
+            return false
+        }
+        else {
+            credits += 1
+            return true
+        }
     }
 }

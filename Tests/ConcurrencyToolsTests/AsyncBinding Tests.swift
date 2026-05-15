@@ -83,11 +83,7 @@ struct ThrowingAsyncBindingTests {
     
     @Test("Dynamic init: wrappedValue calls the getter")
     func dynamicInitGet() async throws {
-        let binding = ThrowingAsyncBinding<Int, Error>(
-            initialState: .notStarted,
-            get: { 100 },
-            set: { _ in }
-        )
+        let binding = ThrowingAsyncBinding<Int, Error>(100)
         let value = try await binding.wrappedValue
         #expect(value == 100)
     }
@@ -96,9 +92,9 @@ struct ThrowingAsyncBindingTests {
     func setterReceivesCurrentValue() async throws {
         let binding = ThrowingAsyncBinding<Int, Error>(10)
         
-        await binding.setWrappedValue(setter: { value in
-            value *= 2
-        })
+        await binding.mutateWrappedValue { value in
+            value = .success(try value.get() * 2)
+        }
         
         let result = try await binding.wrappedValue
         #expect(result == 20)
@@ -111,8 +107,7 @@ struct ThrowingAsyncBindingTests {
         struct TestError: Error, Equatable {}
         
         let binding = ThrowingAsyncBinding<Int, TestError>(
-            initialState: .notStarted,
-            get: { () throws(TestError) -> Int in throw TestError() },
+            { () throws(TestError) -> Int in throw TestError() },
             set: { _ in }
         )
         
