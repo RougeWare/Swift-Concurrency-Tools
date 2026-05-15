@@ -226,6 +226,7 @@ public extension ThrowingAsyncBinding {
     ///
     /// If this binding was initialized with a single value rather than a getter function, then that value immediately becomes available once again.
     func refresh() {
+        valueGenerator.reset()
         initializeInBackground()
     }
 }
@@ -350,5 +351,11 @@ private extension ThrowingAsyncBinding {
         
         /// Generates the value. Whether or not the generator succeeds, the resulting value/error is stored forever
         let generator: Get
+        
+        
+        /// Resets this value generator to its initial state
+        mutating func reset() {
+            cache = nil
+        }
     }
 }
