@@ -21,10 +21,11 @@ struct TaskSugarTests {
     /// `@Sendable` async closure — which Swift 6 strict concurrency rightly rejects
     /// as a data race. Returning the timestamps from `resync` keeps the closure free
     /// of captured mutable state.
-    @available(macOS, deprecated: 13, obsoleted: 28)
-    @available(iOS, deprecated: 16, obsoleted: 28)
+//    @available(macOS, deprecated: 13, obsoleted: 28)
+//    @available(iOS, deprecated: 16, obsoleted: 28)
     @Test("Task.sleep(seconds:) pauses for approximately the requested duration")
     func sleepSeconds() throws {
+        guard #unavailable(macOS 28, iOS 28) else { return }
         let sleepSeconds = TimeInterval.random(in: 2 ..< 4)
         
         let (before, after) = try resync { () -> (Date, Date) in

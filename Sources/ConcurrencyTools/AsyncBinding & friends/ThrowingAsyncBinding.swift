@@ -16,8 +16,6 @@ import FunctionTools
 // This is the "base class". `AsyncBinding`, `ThrowingAsyncLazy`, and `AsyncLazy` are all thin wrappers around `ThrowingAsyncBinding`.
 
 /// A `Binding` implementation where the value getter/setter act asynchronously and might throw a failure.
-@available(macOS 12, *)
-@available(iOS 15, *)
 public struct ThrowingAsyncBinding<Value, Failure>: Sendable
 where Value: Sendable,
       Failure: Error,
@@ -42,9 +40,6 @@ where Value: Sendable,
     @MutableSafePointer
     private var valueGenerator: ValueGenerator
     
-//    /// If the dev wants to listen for changes with a callback, they set this on init
-//    private var onDidChange: OnDidChange?
-    
     private var onDidChange_shim: Set<AnyCancellable> = []
     
     /// Guarantees exclusive access to getting the value
@@ -65,7 +60,6 @@ where Value: Sendable,
     private init(subject: Subject, valueGenerator: ValueGenerator, set onDidChange: OnDidChange? = nil) {
         self.subject = subject
         self._valueGenerator = MutableSafePointer(to: valueGenerator)
-//        self.onDidChange = onDidChange
         
         subject.sink { newState in
             resync {
@@ -108,8 +102,6 @@ where Value: Sendable,
 
 // MARK: - API - get
 
-@available(macOS 12, *)
-@available(iOS 15, *)
 public extension ThrowingAsyncBinding {
     
     /// The value inside this binding.
@@ -166,8 +158,6 @@ public extension ThrowingAsyncBinding {
 
 // MARK: - API - mutate
 
-@available(macOS 12, *)
-@available(iOS 15, *)
 public extension ThrowingAsyncBinding {
     
     /// Mutates the currently-held value, andor performs some action if there is no such value but instead a failure.
@@ -227,8 +217,6 @@ public extension ThrowingAsyncBinding {
 
 // MARK: - API - reset
 
-@available(macOS 12, *)
-@available(iOS 15, *)
 public extension ThrowingAsyncBinding {
     
     /// Delete the stored value/failure and start loading a new one from the getter supplied when this binding was initialized.
@@ -244,8 +232,6 @@ public extension ThrowingAsyncBinding {
 
 // MARK: - loading
 
-@available(macOS 12, *)
-@available(iOS 15, *)
 private extension ThrowingAsyncBinding {
     
     /// Immediately start loading the value inside the binding.
@@ -332,8 +318,6 @@ private extension ThrowingAsyncBinding {
 
 // MARK: Storage
 
-@available(macOS 12, *)
-@available(iOS 15, *)
 private extension ThrowingAsyncBinding {
     
     /// Describes how the value is generated

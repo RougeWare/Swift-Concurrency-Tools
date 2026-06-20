@@ -10,8 +10,6 @@
 
 
 /// A `Binding` implementation where the value getter/setter act asynchronously.
-@available(macOS 12, *)
-@available(iOS 15, *)
 public struct AsyncBinding<Value>: Sendable
 where Value: Sendable
 {
@@ -54,8 +52,6 @@ where Value: Sendable
 
 // MARK: - API - get
 
-@available(macOS 12, *)
-@available(iOS 15, *)
 public extension AsyncBinding {
     
     /// The value inside this binding.
@@ -82,8 +78,6 @@ public extension AsyncBinding {
 
 // MARK: - API - mutate
 
-@available(macOS 12, *)
-@available(iOS 15, *)
 public extension AsyncBinding {
     
     /// Mutates the currently-held value.
@@ -131,8 +125,6 @@ public extension AsyncBinding {
 
 // MARK: - API - reset
 
-@available(macOS 12, *)
-@available(iOS 15, *)
 public extension AsyncBinding {
     
     /// Delete the stored value and start loading a new one from the getter supplied when this binding was initialized.

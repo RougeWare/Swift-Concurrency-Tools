@@ -16,12 +16,13 @@ struct App: SwiftUI.App {
     var body: some Scene {
         WindowGroup {
             ContentView(asyncResource: AsyncBinding {
-                await someActor.loadResource()
-            } set: { state in
-                if case .success(let newValue) = state {
-                    await someActor.setResource(newValue)
+                    await someActor.loadResource()
+                } set: { state in
+                    if case .success(let newValue) = state {
+                        await someActor.setResource(newValue)
+                    }
                 }
-            })
+            )
         }
     }
 }
@@ -30,21 +31,20 @@ struct App: SwiftUI.App {
 
 struct ContentView: View {
 
-    let asyncResource: AsyncBinding<AsyncResource>
+    let asyncResource: AsyncBinding<MyResource>
     
     @State
-    var lazyLoadedResource: AsyncResource? // `Optional` for this example, but `LoadingState` would be much better
+    var lazyLoadedResource: MyResource? // `Optional` for this example, but `LoadingState` would be much better
     
     
     var body: some View {
         if let lazyLoadedResource {
             TextField(Binding { // TextField needs a traditional binding, and that's just fine here
-                lazyLoadedResource.name
-            } set: {
-                Task {
+                    lazyLoadedResource.name
+                } set: {
                     await asyncResource.setWrappedValue($0)
                 }
-            })
+            )
         }
         else {
             Button("Click to load") {
@@ -74,19 +74,20 @@ struct App: SwiftUI.App {
     var body: some Scene {
         WindowGroup {
             ContentView(asyncResource: ThrowingAsyncBinding {
-                try await someActor.loadResource()
-            } set: { state in
-                switch state {
-                case .success(let newValue):
-                    await someActor.setResource(newValue)
-                    
-                case .failure(let error):
-                    log(error: error)
-                    
-                case .loading, .notStarted:
-                    break // transient states; nothing to forward
+                    try await someActor.loadResource()
+                } set: { state in
+                    switch state {
+                    case .success(let newValue):
+                        await someActor.setResource(newValue)
+                        
+                    case .failure(let error):
+                        log(error: error)
+                        
+                    case .loading, .notStarted:
+                        break // transient states; nothing to forward
+                    }
                 }
-            })
+            )
         }
     }
 }
@@ -95,10 +96,10 @@ struct App: SwiftUI.App {
 
 struct ContentView: View {
 
-    let asyncResource: ThrowingAsyncBinding<AsyncResource, Error>
+    let asyncResource: ThrowingAsyncBinding<MyResource, Error>
     
     @State
-    var lazyLoadedResource: AsyncResource? // `Optional` for this example, but `LoadingState` would be much better
+    var lazyLoadedResource: MyResource? // `Optional` for this example, but `LoadingState` would be much better
     
     @State
     var latestError: LocalizedError?

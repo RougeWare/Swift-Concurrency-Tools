@@ -9,9 +9,10 @@ import Foundation
 
 
 
-/// Controls a suspension point in a test, allowing one task to park and another to release it at a precise moment.
+/// Controls a suspension point, allowing one task to park and another to release it arbitrarily.
 ///
-/// Use this to manufacture deterministic interleaving in concurrency tests without relying on sleep-based timing.
+/// You may think of this as a more-limited semaphore
+/// Use this to guarantee deterministic interleaving in concurrency contexts without relying on sleep-based timing.
 ///
 /// ```swift
 /// let gate = Gate()
@@ -25,8 +26,9 @@ import Foundation
 /// ```
 public actor Gate {
     
-    /// ``resume()`` calls that arrived before a matching ``suspend()``,
-    /// banked so the next suspend returns immediately rather than parking.
+    /// ``resume()`` calls that arrived before a matching ``suspend()``.
+    ///
+    /// We track this so the next ``suspend()`` call returns immediately rather than parking
     private var credits = 0
     
     /// Tasks parked by ``suspend()``, in arrival order.
