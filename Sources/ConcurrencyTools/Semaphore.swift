@@ -9,88 +9,99 @@ import Foundation
 
 
 
-/// An async counting semaphore — a coordination primitive that suspends
-/// callers when a resource is unavailable, rather than blocking a thread.
+/// A modern API for semaphores.
 ///
-/// A semaphore holds a non-negative count of "permits". Calling ``wait()``
-/// either consumes a permit (returning right away) or suspends the caller
-/// until ``signal()`` releases one. With an initial count of `1`, the
-/// semaphore behaves as a mutual-exclusion lock that's safe to hold
-/// across `await` boundaries.
+/// This file provides a modern (structured concurrency) API for counting semaphores, without using GCD at all.
 ///
-/// Unlike `DispatchSemaphore`, this implementation never blocks an OS
-/// thread. Suspended callers are parked by the Swift concurrency runtime
-/// and resumed cooperatively, so they don't consume thread-pool capacity
-/// while waiting. This is what makes the semaphore safe to use under
-/// heavy task load, where blocking a thread would risk deadlocking the
-/// cooperative pool.
+/// Call ``wait()`` to pause there and wait for something else to call ``signal()``.
 ///
-/// ## Example — protect a critical section across `await`
+/// You can provide an initial permit count to make it so that ``wait()`` doesn't actually wait until it's run out of permits.
+///
+/// Calling ``signal()`` when there's nothing waiting does nothing.
+/// Calling ``wait()`` when nothing will signal it later will result in that task permanently freezing..
+///
+/// Learn more about counting semaphores here: https://en.wikipedia.org/wiki/Semaphore_(programming)
+///
+///
+///
+/// ### Example 1
+///
+/// Protect a critical section by `await`ing ``wait()``:
 ///
 /// ```swift
 /// actor Client {
 ///     private let semaphore = Semaphore(initialPermitCount: 1)
 ///
 ///     func request() async throws -> Data {
-///         await semaphore.wait()
+///         await semaphore.wait() // Only waits if at least 1 other thing already called this, but hasn't yet been `signal`ed.
 ///         defer { semaphore.signal() }
-///         return try await URLSession.shared.data(for: request).0
+///         return try await URLSession.shared.data(for: /*...*/).0
 ///     }
 /// }
 /// ```
 ///
-/// ## Example — bounded concurrency
+///
+///
+/// ### Example 2
+///
+/// Bounded concurrency: allow _n_ things at once. Before any new things can start, one old one must be signaled:
 ///
 /// ```swift
-/// // Allow at most 4 downloads in flight at once
-/// let downloads = Semaphore(initialPermitCount: 4)
+/// // Allow 4 downloads at the same time
+/// let downloadSemaphore = Semaphore(initialPermitCount: 4)
+///
+/// for resource in resources {
+///     await downloadSemaphore.wait()
+///     resource.download { result in
+///         downloadSemaphore.signal()
+///         // ...
+///     }
+/// }
 /// ```
 ///
-/// ## Cancellation
 ///
-/// ``wait()`` is intentionally **not** cancellable: a task may be marked
-/// cancelled while waiting, but the wait still completes normally when
-/// a signal arrives. If you want a cancelled task to stop waiting and
-/// throw `CancellationError`, use ``waitUnlessCancelled()`` instead.
+///
+/// - Note: Unlike ``DispatchSemaphore``, `Semaphore` never blocks an actual OS thread.
+///         Instead, callers of ``wait()`` are suspended by the Swift concurrency runtime and resumed cooperatively.
+///         This makes `Semaphore` safe to run under heavy task load, where ``DispatchSemaphore`` isn't.
+///
+///- Note: This intentionally ignores cooperative cancelling. The ``wait()`` and ``signal()`` functions always work the same regardless of whether the current task is cancelled.
+///        This follows the principal of least surprise: you wouldn't expect just using a semaphore to be the thing that prematurely exits your current task, and you might want to use a semaphore to handle the catching of a ``CancellationError``, so this leaves cooperative cancelling up to the caller to do more explicitly elsewhere.
+///
+/// - Attention: To prevent a complete deadlock, deallocating this semaphore also signals everyone `wait`ing on it, so make sure you keep a reference to it as long as you want things waiting
 public final class Semaphore: @unchecked Sendable {
     
-    /// Guards `permits` and `suspensions`. `NSLock` is a thin wrapper
-    /// around `pthread_mutex` — it's not GCD, and only enters the kernel
-    /// when there's actual contention.
-    private let lock = NSLock()
-    
-    /// How many permits are currently available. Never negative.
-    /// When this is `0`, callers join `suspensions` instead of returning.
-    private var permits: Int
-    
-    /// FIFO queue of suspended callers. Each suspension is held by
-    /// reference so a cancellation handler can find a specific waiter
-    /// using `===` identity (continuations aren't `Equatable`).
-    private var suspensions: [Suspension] = []
-    
-    
-    /// Creates a semaphore with the given starting number of permits.
+    /// Guarantees that access to the state of this class is mutually exclusive across concurrency contexts, just like an `actor`, but without having to `await` anything that isn't explicitly marked `await`.
     ///
-    /// - Parameter initialPermitCount: How many permits are available
-    ///   at creation. The two most common choices are `0` (every caller
-    ///   waits for the first signal) and `1` (the semaphore acts as a
-    ///   mutual-exclusion lock).
+    /// This allows us to write `singal()` without writing `await signal()`.
+    ///
+    /// `NSLock` is a thin wrapper around the POSIX (not GCD) call `pthread_mutex_*` functions. That only uses kernelspace when there's actual contention, which keeps the uncontended `wait()`/`signal()` path cheap.
+    private let fakeActor = NSLock()
+    
+    /// How many permits are currently available.
+    ///
+    /// When this is `0`, callers join ``waiters`` instead of returning.
+    private var permits: UInt
+    
+    /// FIFO queue of waiting callers, each represented as the continuation that resumes it.
+    ///
+    /// The longest-waiting caller sits at the front, so ``signal()`` serves arrivals in the order in which they were received, so no caller can be starved.
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    
+    
+    /// Creates a semaphore, optionally with the given starting number of permits.
+    ///
+    /// - Parameter initialPermitCount: The initial number of permits available in this semaphore. The two most common choices are `0` (every caller waits for the first signal) and `1` (the semaphore acts as a mutual-exclusion lock).
+    ///                                 Defaults to `0`.
     public init(initialPermitCount: UInt = 0) {
-        self.permits = Int(initialPermitCount)
+        self.permits = UInt(initialPermitCount)
     }
     
     
     deinit {
-        // Resume any leftover waiters so their tasks don't leak forever.
-        // No locking needed: by the time deinit runs, nothing else can
-        // be holding a reference to this instance.
-        //
-        // (In practice this branch is rarely reachable, since each
-        // pending `wait()` callsite holds the Semaphore alive via its
-        // function frame. It's here as a safety net for the case where
-        // the user's lifecycle management lets the instance drop.)
-        for suspension in suspensions {
-            suspension.resume()
+        // Resume all waiters so they don't wait forever on a deallocated semaphore
+        for waiter in waiters {
+            waiter.resume()
         }
     }
 }
@@ -103,57 +114,58 @@ public extension Semaphore {
     
     /// Suspends the caller until a permit becomes available.
     ///
-    /// If a permit is already available, this returns right away after
-    /// consuming it. Otherwise the caller joins the FIFO wait queue and
-    /// resumes when a future ``signal()`` releases a permit to them.
+    /// When this semaphore is initialized with 0 permits (the default), then this immediately suspents the caller until ``signal()`` is called from elsewhere.
     ///
-    /// This call is **not** cancellable. A cancelled task that's waiting
-    /// will keep waiting; it just sees `Task.isCancelled == true` after
-    /// the wait returns. For cancellable behavior, use
-    /// ``waitUnlessCancelled()``.
+    /// If a permit is already available, this borrows it and continues immediately.
+    /// Otherwise, the caller joins the FIFO wait queue and resumes when a future ``signal()`` gives it a freed permit.
+    ///
+    /// This call is **not cancellable**.
+    /// A cancelled task that is waiting keeps waiting, and may handle cancellation once the wait returns.
+    /// See the type docuemtation's notes for more.
     func wait() async {
         await withCheckedContinuation { continuation in
-            lock.lock()
+            fakeActor.lock()
             
-            if 0 < permits {
+            guard 0 >= permits else {
                 permits -= 1
-                lock.unlock()
+                fakeActor.unlock()
                 continuation.resume()
                 return
             }
             
-            suspensions.append(Suspension(continuation))
-            lock.unlock()
+            waiters.append(continuation)
+            fakeActor.unlock()
         }
     }
     
     
     /// Releases one permit, resuming the next waiting caller if any.
     ///
-    /// If callers are queued, the longest-waiting one resumes. Otherwise
-    /// the permit count grows by one, so the next ``wait()`` returns
-    /// without suspending.
+    /// When this semaphore is initialized with 0 permits (the default), then this immediately resumes the only waiter.
+    ///
+    /// If there are existing waiters, this resumes the one which has been waiting the longest.
+    /// Else, this increases the permit count grows by one, so the next ``wait()`` returns without suspending.
     ///
     /// This call is synchronous, so it's safe to use from any context —
-    /// including `defer` blocks, deinitializers, and non-`async`
-    /// functions.
+    /// including `defer` blocks, deinitializers, and non-`async` functions.
     func signal() {
-        lock.lock()
+        fakeActor.lock()
         
-        if false == suspensions.isEmpty {
-            let first = suspensions.removeFirst()
-            lock.unlock()
-            first.resume()
+        if waiters.isEmpty {
+            permits += 1
+            fakeActor.unlock()
         }
         else {
-            permits += 1
-            lock.unlock()
+            let next = waiters.removeFirst()
+            fakeActor.unlock()
+            next.resume()
         }
     }
     
     
-    /// Acquires a permit, runs the given operation, then signals on the
-    /// way out — even if the operation throws.
+    /// Acquires a permit, runs the given operation, then frees the permit on the way out.
+    ///
+    /// The permit is freed even if the operation throws an error.
     ///
     /// Equivalent to:
     /// ```swift
@@ -161,106 +173,19 @@ public extension Semaphore {
     /// defer { semaphore.signal() }
     /// return try await operation()
     /// ```
-    /// …but harder to forget the `signal()` half.
+    /// but without needing to balance `wait()`/`signal()` calls:
+    /// ```swift
+    /// await semaphore.withPermit { // implcit wait() call
+    ///     operation()
+    /// } // implicit signal() call
+    /// ```
+    ///
+    /// - Parameter operation: The work to run when the semaphore has a permit to run it.
+    /// - Returns: Whatever `operation` returns. The permit is freed as this returns.
+    /// - Throws: Whatever `operation` throws. The permit is freed as this throws.
     func withPermit<T>(_ operation: () async throws -> T) async rethrows -> T {
         await wait()
         defer { signal() }
         return try await operation()
-    }
-}
-
-
-
-// MARK: - Private storage
-
-private extension Semaphore {
-    
-    /// One suspended caller. Owned by the semaphore's `suspensions` queue
-    /// and (transitively) referenced by any cancellation handler that
-    /// needs to locate it. Carries either a throwing or non-throwing
-    /// continuation so the same type works for both wait flavors.
-    final class Suspension: @unchecked Sendable {
-        
-        private enum Kind {
-            case nonCancellable(CheckedContinuation<Void, Never>)
-            case cancellable(CheckedContinuation<Void, any Error>)
-        }
-        
-        private enum State {
-            case empty                  // created, no continuation attached yet
-            case waiting(Kind)          // attached, awaiting resume or cancel
-            case finished               // already resumed once
-        }
-        
-        private let lock = NSLock()
-        private var state: State
-        
-        
-        /// Creates an empty suspension whose continuation will be
-        /// attached later via ``adopt(_:)``. Used when the caller needs
-        /// a stable reference *before* it has a continuation to give
-        /// (e.g. for cancellation-handler setup).
-        init() {
-            state = .empty
-        }
-        
-        /// Creates a suspension already holding a non-throwing
-        /// continuation, ready to be resumed.
-        init(_ continuation: CheckedContinuation<Void, Never>) {
-            state = .waiting(.nonCancellable(continuation))
-        }
-        
-        
-        /// Attaches a throwing continuation to a previously empty
-        /// suspension. If the suspension is somehow already finished,
-        /// the continuation is immediately resumed with `CancellationError`
-        /// rather than leaked.
-        func adopt(_ continuation: CheckedContinuation<Void, any Error>) {
-            lock.lock()
-            switch state {
-            case .empty:
-                state = .waiting(.cancellable(continuation))
-                lock.unlock()
-                
-            case .waiting, .finished:
-                lock.unlock()
-                continuation.resume(throwing: CancellationError())
-            }
-        }
-        
-        
-        /// Resume the suspended caller normally. No-op if the suspension
-        /// is already finished.
-        func resume() {
-            lock.lock()
-            guard case .waiting(let kind) = state else {
-                lock.unlock()
-                return
-            }
-            state = .finished
-            lock.unlock()
-            
-            switch kind {
-            case .nonCancellable(let continuation): continuation.resume()
-            case .cancellable(let continuation):    continuation.resume()
-            }
-        }
-        
-        
-        /// Resume the suspended caller with `CancellationError`. No-op
-        /// if the suspension is already finished, and also a no-op for
-        /// non-cancellable suspensions (which by contract are never
-        /// reached by a cancellation handler).
-        func cancel() {
-            lock.lock()
-            guard case .waiting(.cancellable(let continuation)) = state else {
-                lock.unlock()
-                return
-            }
-            state = .finished
-            lock.unlock()
-            
-            continuation.resume(throwing: CancellationError())
-        }
     }
 }
