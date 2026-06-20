@@ -1,5 +1,15 @@
 {
+  "originHash" : "babdccaf98f7fe97ff3d551be3f40540b3a97bad5cd4e90d3c8985382dee4a34",
   "pins" : [
+    {
+      "identity" : "swift-function-tools",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/RougeWare/Swift-Function-Tools.git",
+      "state" : {
+        "revision" : "0cc2083f05dc12fa70451985c0c3390e63b468ed",
+        "version" : "2.0.0"
+      }
+    },
     {
       "identity" : "swift-optional-tools",
       "kind" : "remoteSourceControl",
@@ -19,5 +29,5 @@
       }
     }
   ],
-  "version" : 2
+  "version" : 3
 }

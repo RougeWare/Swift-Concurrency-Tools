@@ -19,6 +19,17 @@ where Value: Sendable
     
     /// The value was successfulyl loaded, and stored in this case
     case success(Value)
+    
+    
+    /// Losslessly convert the given non-failing ``FailableLoadingState`` into a ``LoadingState``
+    public init(_ failableLoadingState: FailableLoadingState<Value, Never>) {
+        switch failableLoadingState {
+        case .notStarted:         self = .notStarted
+        case .loading:            self = .loading
+        case .success(let value): self = .success(value)
+        // case .failure(_) actually doesn't need to be here because its only possible associated value is `Never`! Cool!
+        }
+    }
 }
 
 

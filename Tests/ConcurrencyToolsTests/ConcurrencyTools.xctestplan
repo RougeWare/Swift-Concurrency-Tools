@@ -1,0 +1,25 @@
+{
+  "configurations" : [
+    {
+      "id" : "B97BEFCD-888E-4D00-8683-629EF6E18480",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "performanceAntipatternCheckerEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "ConcurrencyToolsTests",
+        "name" : "ConcurrencyToolsTests"
+      }
+    }
+  ],
+  "version" : 1
+}

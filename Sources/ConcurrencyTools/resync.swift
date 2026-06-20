@@ -2,13 +2,13 @@
 //  resync.swift
 //  Plural Diagramming
 //
-//  Created by The Northstar✨ System on 2023-01-17.
+//  Created by Ky on 2023-01-17.
 //
 
 import Foundation
 
 import OptionalTools
-import SafePointer
+@preconcurrency import SafePointer
 
 
 
@@ -20,7 +20,7 @@ import SafePointer
 ///   - timeout:      _optional_ - How long to wait for the async function to complete before giving up. `nil` signifies to wait forever. Defaults to `nil`
 ///   - asyncFunction: The function to convert into a synchronous one
 public func resync<Value>(timeout: DispatchTime? = nil,
-                          _ asyncFunction: @escaping () async throws -> Value)
+                          _ asyncFunction: @escaping @Sendable () async throws -> Value)
 throws -> Value {
     let semaphore = DispatchSemaphore.default
     
@@ -64,12 +64,12 @@ throws -> Value {
 ///
 /// - Parameters:
 ///   - asyncFunction: The function to convert into a synchronous one
-public func resync<Value>(_ asyncFunction: @escaping () async -> Value) -> Value {
+public func resync<Value>(_ asyncFunction: @escaping @Sendable () async -> Value) -> Value {
     let semaphore = DispatchSemaphore.default
     
     let result = MutableSafePointer<Optional<Value>>(to: .none)
     
-    Task.detached(priority: .high) {
+    Task.immediateDetached(priority: .userInitiated) {
         defer {
             semaphore.signal()
         }
@@ -95,5 +95,15 @@ public func resync<Value>(_ asyncFunction: @escaping () async -> Value) -> Value
 struct TaskNeverExecutedError: LocalizedError {
     var errorDescription: String? {
         "Attempted to run a background task, but the task didn't finish as expected"
+    }
+    
+    
+    var recoverySuggestion: String? {
+        "File a bug report and be sure to include whatever makes your setup different from the unit tests in this package."
+    }
+    
+    
+    var helpAnchor: String? {
+        "https://github.com/RougeWare/Swift-Concurrency-Tools/issues/new/choose"
     }
 }

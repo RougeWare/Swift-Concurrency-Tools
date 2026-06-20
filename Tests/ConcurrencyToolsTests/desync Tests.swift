@@ -1,49 +1,45 @@
 //
 //  desync Tests.swift
-//  
+//  ConcurrencyTools
 //
-//  Created by Northstar✨System on 2023-05-22.
+//  Created by Ky on 2023-05-22.
+//  Migrated to Swift Testing on 2026-05-14.
 //
 
-import XCTest
+import Testing
+import Foundation
 import ConcurrencyTools
 
-final class desync_Tests: XCTestCase {
 
-    func testDesync() throws {
-        print(Date())
-        defer { print(Date()) }
-        
-        let semaphore = DispatchSemaphore.default
-        
-        var didFinishDesyncCallback = false
-        
-        desync(task: TestActor.default.int) { result in
-            defer {
-                semaphore.signal()
-                didFinishDesyncCallback = true
-            }
-            
-            switch result {
-            case .success(let success):
-                print("desync successfully got `\(success)`")
-            case .failure(let failure):
-                print("desync successfully caught this error: \(failure)")
+
+@Suite("desync")
+struct DesyncTests {
+    
+    /// Verifies that `desync` invokes its callback exactly once with the eventual result.
+    ///
+    /// The original test used a `DispatchSemaphore` plus a captured `Bool` flag to
+    /// confirm the callback fired. Under Swift 6, mutating that flag inside a
+    /// `@Sendable` callback is a data race. Bridging through a `CheckedContinuation`
+    /// removes both the flag and the semaphore — if the continuation never resumes,
+    /// the test's `.timeLimit` fails it for us.
+    @Test("Invokes its callback with the result of the wrapped async task",
+          .timeLimit(.minutes(1)))
+    func invokesCallback() async {
+        let result: Result<Int, Error> = await withCheckedContinuation { continuation in
+            ConcurrencyTools.desync(task: TestActor.default.int) { result in
+                continuation.resume(returning: result)
             }
         }
         
-        let timeoutResult = semaphore.wait(timeout: .now() + (TestActor.defaultSleepTime * 5))
-        
-        switch timeoutResult {
-        case .success:
-            print("desync success")
-            
-        case .timedOut:
-            XCTFail("desync didn't finish in time")
-        }
-        
-        if !didFinishDesyncCallback {
-            XCTFail("desync never reached end of callback block")
+        // The test cares that the callback fired — either outcome is acceptable
+        // for proving `desync`'s plumbing works. We surface the value so a future
+        // test reader can see what came back if they're debugging.
+        switch result {
+        case .success(let int):
+            print("desync delivered success: \(int)")
+        case .failure(let error):
+            // TestActor.int can throw on cancellation; that still proves the bridge fired.
+            print("desync delivered failure: \(error)")
         }
     }
 }
