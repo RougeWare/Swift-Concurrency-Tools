@@ -11,8 +11,7 @@ import FunctionTools
 
 
 /// A `Lazy` implementation where the value generator acts asynchronously and might throw a failure
-@available(macOS 12, *)
-@available(iOS 15, *)
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 public struct ThrowingAsyncLazy<Value, Failure>: Sendable
 where Value: Sendable,
       Failure: Error & Sendable
@@ -55,8 +54,7 @@ where Value: Sendable,
 
 // MARK: - API - get
 
-@available(macOS 12, *)
-@available(iOS 15, *)
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 public extension ThrowingAsyncLazy {
     
     /// The value that's lazily-loaded.

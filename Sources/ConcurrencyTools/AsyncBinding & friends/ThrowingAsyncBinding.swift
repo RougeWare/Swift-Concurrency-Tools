@@ -16,8 +16,7 @@ import FunctionTools
 // This is the "base class". `AsyncBinding`, `ThrowingAsyncLazy`, and `AsyncLazy` are all thin wrappers around `ThrowingAsyncBinding`.
 
 /// A `Binding` implementation where the value getter/setter act asynchronously and might throw a failure.
-@available(macOS 12, *)
-@available(iOS 15, *)
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *) // sadly, this would be macOS 12, iOS 15, etc. if `resync` could be reliably made without requiring 26
 public struct ThrowingAsyncBinding<Value, Failure>: Sendable
 where Value: Sendable,
       Failure: Error,
@@ -108,8 +107,7 @@ where Value: Sendable,
 
 // MARK: - API - get
 
-@available(macOS 12, *)
-@available(iOS 15, *)
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 public extension ThrowingAsyncBinding {
     
     /// The value inside this binding.
@@ -166,8 +164,7 @@ public extension ThrowingAsyncBinding {
 
 // MARK: - API - mutate
 
-@available(macOS 12, *)
-@available(iOS 15, *)
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 public extension ThrowingAsyncBinding {
     
     /// Mutates the currently-held value, andor performs some action if there is no such value but instead a failure.
@@ -227,8 +224,7 @@ public extension ThrowingAsyncBinding {
 
 // MARK: - API - reset
 
-@available(macOS 12, *)
-@available(iOS 15, *)
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 public extension ThrowingAsyncBinding {
     
     /// Delete the stored value/failure and start loading a new one from the getter supplied when this binding was initialized.
@@ -244,8 +240,7 @@ public extension ThrowingAsyncBinding {
 
 // MARK: - loading
 
-@available(macOS 12, *)
-@available(iOS 15, *)
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 private extension ThrowingAsyncBinding {
     
     /// Immediately start loading the value inside the binding.
@@ -332,8 +327,7 @@ private extension ThrowingAsyncBinding {
 
 // MARK: Storage
 
-@available(macOS 12, *)
-@available(iOS 15, *)
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 private extension ThrowingAsyncBinding {
     
     /// Describes how the value is generated

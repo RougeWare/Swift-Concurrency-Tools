@@ -23,6 +23,7 @@ import Foundation
 ///
 /// await gate.suspend()
 /// ```
+@available(macOS 15.4, iOS 18.4, watchOS 11.4, tvOS 18.4, visionOS 2.4, macCatalyst 18.4, *)
 public actor Gate {
     
     /// ``resume()`` calls that arrived before a matching ``suspend()``,
@@ -48,6 +49,7 @@ public actor Gate {
 
 // MARK: - API
 
+@available(macOS 15.4, iOS 18.4, watchOS 11.4, tvOS 18.4, visionOS 2.4, macCatalyst 18.4, *)
 public extension Gate {
     
     /// Suspends the caller here until ``resume()`` is called from elsewhere

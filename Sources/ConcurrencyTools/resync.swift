@@ -19,6 +19,7 @@ import OptionalTools
 /// - Parameters:
 ///   - timeout:      _optional_ - How long to wait for the async function to complete before giving up. `nil` signifies to wait forever. Defaults to `nil`
 ///   - asyncFunction: The function to convert into a synchronous one
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 public func resync<Value>(timeout: DispatchTime? = nil,
                           _ asyncFunction: @escaping @Sendable () async throws -> Value)
 throws -> Value {
@@ -26,7 +27,7 @@ throws -> Value {
     
     let result = MutableSafePointer<Optional<Result<Value, Error>>>(to: .none)
     
-    Task.detached(priority: .high) {
+    Task.immediateDetached(priority: .high) {
         defer {
             semaphore.signal()
         }
@@ -64,6 +65,7 @@ throws -> Value {
 ///
 /// - Parameters:
 ///   - asyncFunction: The function to convert into a synchronous one
+@available(macOS 26, iOS 26, watchOS 26, tvOS 26, visionOS 26, macCatalyst 26, *)
 public func resync<Value>(_ asyncFunction: @escaping @Sendable () async -> Value) -> Value {
     let semaphore = DispatchSemaphore.default
     
