@@ -16,7 +16,7 @@ public struct AsyncBinding<Value>: Sendable
 where Value: Sendable
 {
     public typealias ThrowingAnalog = ThrowingAsyncBinding<Value, Never>
-    public typealias LoadingState = ThrowingAnalog.LoadingState
+    public typealias LoadingState = ConcurrencyTools.LoadingState<Value>
     public typealias Get = ThrowingAnalog.Get
     public typealias OnDidChange = ThrowingAnalog.OnDidChange
     public typealias MutateWrappedValue = @Sendable (inout Value) async -> Void
@@ -140,22 +140,5 @@ public extension AsyncBinding {
     /// If this binding was initialized with a single value rather than a getter function, then that value immediately becomes available once again.
     func refresh() {
         storage.refresh()
-    }
-}
-
-
-
-
-// MARK: - API - listen for changes
-
-@available(macOS 12, *)
-@available(iOS 15, *)
-public extension AsyncBinding {
-    
-    /// This publishes any/all changes to this binding's wrapped value.
-    ///
-    /// - Note: Receiving this publisher won't affect the internal state of this binding; something must request the value (``wrappedValue``) or current loading state (``loadingState``) in order for loading to start.
-    var publisher: Publisher {
-        storage.publisher
     }
 }

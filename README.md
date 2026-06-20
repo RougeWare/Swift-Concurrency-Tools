@@ -17,8 +17,10 @@ struct App: SwiftUI.App {
         WindowGroup {
             ContentView(asyncResource: AsyncBinding {
                 await someActor.loadResource()
-            } set: {
-                await someActor.setResource($0)
+            } set: { state in
+                if case .success(let newValue) = state {
+                    await someActor.setResource(newValue)
+                }
             })
         }
     }
@@ -55,8 +57,6 @@ struct ContentView: View {
 }
 ```
 
-This also lets you peek at the current loading state and subscribe to changes as a Combine publisher.
-
 **And friends!** This concept is broken into 4 types:
 - `AsyncBinding`: Like a `Binding`, but async
 - `ThrowingAsyncBinding`: A version of `AsyncBinding` where the setter/getter might throw an error
@@ -64,7 +64,7 @@ This also lets you peek at the current loading state and subscribe to changes as
 - `ThrowingAsyncLazy` A version of `AsyncLazy` where the initial value generator might throw an error 
 
 
-Of course, the thowing variants need some extra considerations for their extra states. For example, when responding to a value changing in a `Binding` or `AsyncBinding`, you just pass a `set` function to the initializer which takes the new value. However, when the value in a `ThrowingAsyncBinding` changes, that same `set` function needs to accept a `Result` which could either be the value or the failure, and calling `.wrappedValue` might result in the error being thrown. For example:
+Of course, the throwing variants need some extra considerations for their extra states. For example, when the binding changes, the `set:` callback for a `ThrowingAsyncBinding` might receive `.failure(error)` instead of `.success(value)`, and calling `.wrappedValue` might result in the error being thrown. For example:
 
 ```swift
 struct App: SwiftUI.App {
@@ -75,13 +75,16 @@ struct App: SwiftUI.App {
         WindowGroup {
             ContentView(asyncResource: ThrowingAsyncBinding {
                 try await someActor.loadResource()
-            } set: {
-                switch $0 {
+            } set: { state in
+                switch state {
                 case .success(let newValue):
                     await someActor.setResource(newValue)
                     
                 case .failure(let error):
                     log(error: error)
+                    
+                case .loading, .notStarted:
+                    break // transient states; nothing to forward
                 }
             })
         }
@@ -92,7 +95,7 @@ struct App: SwiftUI.App {
 
 struct ContentView: View {
 
-    let asyncResource: ThrowingAsyncBinding<AsyncResource>
+    let asyncResource: ThrowingAsyncBinding<AsyncResource, Error>
     
     @State
     var lazyLoadedResource: AsyncResource? // `Optional` for this example, but `LoadingState` would be much better
@@ -182,22 +185,19 @@ These allow you to model the current state of loading something which might fail
 You might think of these similarly to `Result`, but with additional cases describing the current loading state if it's not yet resolved.
 
 ```swift
-switch bigResource.peekLoadingState {
-    case .notStarted:
-        Button("Start loading") {
-            Task { _ = await asyncBinding.wrappedValue }
-        }
-        
-    case .loading:
+switch bigResource.loadingState {
+    case .notStarted, .loading:
         ProgressView()
         
     case .success(let bigResource):
         BigResourceView(bigResource)
         
     case .failure(let failure):
-        ErrorView(failue)
+        ErrorView(failure)
 }
 ```
+
+> Note: simply reading `loadingState` will kick off loading if it hasn't started yet, so the `.notStarted` case won't appear in this kind of switch. To react to changes (including the transition out of `.notStarted`), pass a `set:` callback when you construct the binding.
 
 
 
@@ -284,6 +284,7 @@ semaphore.wait()
 The following LLMs were directed to assist with some parts of this package:
 - Claude 4.5 Sonnet
 - Claude 4.6 Sonnet
+- Claude 4.7 Opus
 - GPT-OSS
 
 These LLMs were never given direct access to the files in this package. They were directed by providing contexts and goals in web chats, and their responses were used to inform how this package was written. All code was critically inspected & reviewed by the package maintainers, regardless of how that code was written.

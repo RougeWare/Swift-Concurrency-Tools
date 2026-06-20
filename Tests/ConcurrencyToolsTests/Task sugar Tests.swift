@@ -1,31 +1,41 @@
 //
 //  Task sugar Tests.swift
-//  
+//  ConcurrencyTools
 //
 //  Created by Northstar✨System on 2023-05-22.
+//  Migrated to Swift Testing on 2026-05-14.
 //
 
-import XCTest
+import Testing
+import Foundation
 import ConcurrencyTools
 
-final class Task_sugar_Ttests: XCTestCase {
 
+
+@Suite("Task sugar")
+struct TaskSugarTests {
+    
+    /// Verifies that `Task.sleep(seconds:)` actually pauses for roughly the requested duration.
+    ///
+    /// The original test captured two `var` timestamps and mutated them inside an
+    /// `@Sendable` async closure — which Swift 6 strict concurrency rightly rejects
+    /// as a data race. Returning the timestamps from `resync` keeps the closure free
+    /// of captured mutable state.
     @available(macOS, deprecated: 13, obsoleted: 28)
     @available(iOS, deprecated: 16, obsoleted: 28)
-    func testSleep_seconds() throws {
-        
+    @Test("Task.sleep(seconds:) pauses for approximately the requested duration")
+    func sleepSeconds() throws {
         let sleepSeconds = TimeInterval.random(in: 2 ..< 4)
         
-        var before = Date()
-        var after = Date()
-        
-        try resync {
-            before = Date()
+        let (before, after) = try resync { () -> (Date, Date) in
+            let before = Date()
             try await Task.sleep(seconds: sleepSeconds)
-            after = Date()
+            let after = Date()
+            return (before, after)
         }
         
-        XCTAssertEqual(after.timeIntervalSince(before), sleepSeconds,
-                       accuracy: 1)
+        let elapsed = after.timeIntervalSince(before)
+        let drift = abs(elapsed - sleepSeconds)
+        #expect(drift < 1.0, "Expected ~\(sleepSeconds)s, observed \(elapsed)s (drift \(drift)s)")
     }
 }

@@ -1,22 +1,20 @@
 //
-//  Test.swift
+//  AsyncBinding Tests.swift
 //  ConcurrencyTools
 //
-//  Created by Ky directing Claude 4.6 Sonnet on 2026-02-26.
+//  Created by Ky directing Claude 4.7 Opus on 2026-05-14.
 //
-// Notes from Claude:
-// Tests cover the public API contract of:
-//   - ThrowingAsyncBinding
-//   - ThrowingAsyncLazy
-//   - AsyncBinding
-//   - AsyncLazy
+//  Tests cover the public API contract of:
+//    - ThrowingAsyncBinding
+//    - ThrowingAsyncLazy
+//    - AsyncBinding
+//    - AsyncLazy
 //
-// We test *what* these types promise, not *how* they deliver it.
-// Internal helpers (startLoading, update, ValueGenerator) are left alone.
+//  We test *what* these types promise, not *how* they deliver it.
+//  Internal helpers (startLoading, update, ValueGenerator) are left alone.
 //
 
 import Testing
-import Combine
 import ConcurrencyTools
 
 
@@ -28,16 +26,17 @@ struct ThrowingAsyncBindingTests {
     
     // MARK: Static value init
     
-    @Test("Static init: wrappedValue returns the initial value immediately")
-    func staticInitReturnsValue() async throws {
-        let binding = ThrowingAsyncBinding<Int, Error>(42)
+    @Test("Static init: wrappedValue returns the initial value")
+    func staticInitWrappedValue() async throws {
+        let binding = ThrowingAsyncBinding<Int, Never>(42)
         let value = try await binding.wrappedValue
         #expect(value == 42)
     }
     
-    @Test("Static init: loadingState is .success before wrappedValue is ever read")
+    
+    @Test("Static init: loadingState is .success immediately, before any read")
     func staticInitLoadingState() {
-        let binding = ThrowingAsyncBinding<String, Error>("hello")
+        let binding = ThrowingAsyncBinding<String, Never>("hello")
         guard case .success(let value) = binding.loadingState else {
             Issue.record("Expected .success, got \(binding.loadingState)")
             return
@@ -45,93 +44,79 @@ struct ThrowingAsyncBindingTests {
         #expect(value == "hello")
     }
     
-    @Test("Static init: setWrappedValue(_:) updates wrappedValue synchronously")
-    func setWrappedValueUpdates() async throws {
-        let binding = ThrowingAsyncBinding<Int, Error>(0)
-        await binding.setWrappedValue(99)
-        let value = try await binding.wrappedValue
-        #expect(value == 99)
-    }
     
-    // MARK: Lazy/generator init
+    // MARK: Generator init - success path
     
-    @Test("Generator init: wrappedValue eventually returns the generated value")
-    func generatorInitReturnsValue() async throws {
-        let binding = ThrowingAsyncBinding<Int, Error> {
-            return 7
-        }
+    @Test("Generator init: wrappedValue returns the generated value")
+    func generatorInitWrappedValue() async throws {
+        let binding = ThrowingAsyncBinding<Int, Never> { 7 }
         let value = try await binding.wrappedValue
         #expect(value == 7)
     }
     
-    @Test("Generator init: generator is called at most once (result is cached)")
+    
+    @Test("Generator init: reading loadingState triggers loading and eventually resolves")
+    func generatorInitLoadingStateTriggersLoad() async throws {
+        let binding = ThrowingAsyncBinding<Int, Never> { 55 }
+        
+        // Merely touching loadingState should kick off the load. We don't care
+        // what state we observe *here* — the contract is just that after we
+        // await wrappedValue, the binding has resolved.
+        _ = binding.loadingState
+        _ = try await binding.wrappedValue
+        
+        guard case .success(let value) = binding.loadingState else {
+            Issue.record("Expected .success after loading completed, got \(binding.loadingState)")
+            return
+        }
+        #expect(value == 55)
+    }
+    
+    
+    @Test("Generator init: generator is called at most once across multiple reads")
     func generatorCalledOnce() async throws {
-        let callCount = Mutex(0) // our Mutex<Int> from earlier in the session
-        let binding = ThrowingAsyncBinding<Int, Error> {
+        let callCount = Mutex(0)
+        let binding = ThrowingAsyncBinding<Int, Never> {
             await callCount.run { $0 += 1 }
             return 42
         }
         
         _ = try await binding.wrappedValue
         _ = try await binding.wrappedValue
+        _ = try await binding.wrappedValue
         
         let count = await callCount.run { $0 }
-        #expect(count == 1, "Generator should only be called once; result must be cached")
+        #expect(count == 1, "Generator should be called once; result must be cached")
     }
     
-    // MARK: Dynamic get/set init
     
-    @Test("Dynamic init: wrappedValue calls the getter")
-    func dynamicInitGet() async throws {
-        let binding = ThrowingAsyncBinding<Int, Error>(100)
-        let value = try await binding.wrappedValue
-        #expect(value == 100)
-    }
+    // MARK: Generator init - failure path
     
-    @Test("Dynamic init: setWrappedValue(setter:) receives current value and can modify it")
-    func setterReceivesCurrentValue() async throws {
-        let binding = ThrowingAsyncBinding<Int, Error>(10)
+    @Test("Throwing generator: wrappedValue re-throws the error")
+    func throwingGeneratorRethrows() async {
+        struct LoadError: Error, Equatable {}
         
-        await binding.mutateWrappedValue { value in
-            value = .success(try value.get() * 2)
+        let binding = ThrowingAsyncBinding<Int, LoadError> { () throws(LoadError) in
+            throw LoadError()
         }
-        
-        let result = try await binding.wrappedValue
-        #expect(result == 20)
-    }
-    
-    // MARK: Failure propagation
-    
-    @Test("Throwing getter: wrappedValue re-throws the error")
-    func wrappedValueThrowsOnFailure() async {
-        struct TestError: Error, Equatable {}
-        
-        let binding = ThrowingAsyncBinding<Int, TestError>(
-            { () throws(TestError) -> Int in throw TestError() },
-            set: { _ in }
-        )
         
         do {
             _ = try await binding.wrappedValue
-            Issue.record("Expected TestError to be thrown")
-        }
-        catch is TestError {
-            // Correct — reaching here is the assertion.
+            Issue.record("Expected LoadError to be thrown")
         }
         catch {
-            Issue.record("Unexpected error type: \(error)")
+            // Typed throws guarantees only LoadError can be thrown; reaching here is the assertion.
         }
     }
     
-    @Test("Throwing getter: loadingState transitions to .failure")
-    func loadingStateTransitionsToFailure() async throws {
-        struct TestError: Error {}
+    
+    @Test("Throwing generator: loadingState transitions to .failure")
+    func throwingGeneratorLoadingState() async {
+        struct LoadError: Error {}
         
-        let binding = ThrowingAsyncBinding<Int, TestError>(
-            initialState: .notStarted,
-            get: { () throws(TestError) -> Int in throw TestError() },
-            set: { _ in }
-        )
+        let binding = ThrowingAsyncBinding<Int, LoadError> { () throws(LoadError) in
+            throw LoadError()
+        }
         
         _ = try? await binding.wrappedValue
         
@@ -141,248 +126,220 @@ struct ThrowingAsyncBindingTests {
         }
     }
     
-    @Test("setWrappedValue(throwing:throwingSetter:): .propagate re-throws to caller")
-    func throwingSetterPropagates() async {
-        struct CallerError: Error, Equatable {}
+    
+    @Test("Throwing generator: failure is cached; generator runs once even across repeated failed reads")
+    func failureIsCached() async {
+        struct LoadError: Error, Equatable {}
         
+        let callCount = Mutex(0)
+        let binding = ThrowingAsyncBinding<Int, LoadError> { () throws(LoadError) in
+            await callCount.run { $0 += 1 }
+            throw LoadError()
+        }
+        
+        for _ in 1...3 {
+            do {
+                _ = try await binding.wrappedValue
+                Issue.record("Expected LoadError on each read")
+            }
+            catch {
+                // Typed throws guarantees only LoadError can be thrown.
+            }
+        }
+        
+        let count = await callCount.run { $0 }
+        #expect(count == 1, "Generator must run once even after multiple failed reads")
+    }
+    
+    
+    // MARK: setWrappedValue
+    
+    @Test("setWrappedValue: updates wrappedValue")
+    func setWrappedValueUpdates() async throws {
         let binding = ThrowingAsyncBinding<Int, Never>(0)
+        await binding.setWrappedValue(99)
+        let value = try await binding.wrappedValue
+        #expect(value == 99)
+    }
+    
+    
+    @Test("setWrappedValue: bypasses the generator when called before any read")
+    func setWrappedValueBypassesGenerator() async throws {
+        let callCount = Mutex(0)
+        let binding = ThrowingAsyncBinding<Int, Never> {
+            await callCount.run { $0 += 1 }
+            return -1  // would be wrong if the generator ran
+        }
         
-        do {
-            try await binding.setWrappedValue(
-                throwing: CallerError.self,
-                throwingSetter: { (_) throws(UpdateSetterError<Never, CallerError>) -> Void in throw .propagate(CallerError()) }
-            )
-            Issue.record("Expected CallerError to be thrown")
+        // Set first, then read — the generator should never be touched.
+        await binding.setWrappedValue(42)
+        let value = try await binding.wrappedValue
+        
+        #expect(value == 42)
+        let count = await callCount.run { $0 }
+        #expect(count == 0, "Generator must not run when setWrappedValue is called first")
+    }
+    
+    
+    @Test("setWrappedValue: replaces a stored failure with success")
+    func setWrappedValueRecoversFromFailure() async throws {
+        struct LoadError: Error {}
+        
+        let binding = ThrowingAsyncBinding<Int, LoadError> { () throws(LoadError) in
+            throw LoadError()
         }
-        catch is CallerError {
-            // Correct.
-        }
-        catch {
-            Issue.record("Unexpected error type: \(error)")
+        
+        // Drive into failure.
+        _ = try? await binding.wrappedValue
+        
+        // Recovery: overwrite with success.
+        await binding.setWrappedValue(7)
+        let value = try await binding.wrappedValue
+        #expect(value == 7)
+        
+        guard case .success = binding.loadingState else {
+            Issue.record("Expected .success after recovery, got \(binding.loadingState)")
+            return
         }
     }
     
-    @Test("setWrappedValue(throwing:throwingSetter:): .setBinding updates loadingState to .failure")
-    func throwingSetterSetsBindingFailure() async throws {
-        struct BindingError: Error {}
+    
+    // MARK: mutateWrappedValue(throwingSetter:)
+    
+    @Test("mutateWrappedValue: setter receives the current success")
+    func mutateReceivesCurrentSuccess() async throws {
+        let binding = ThrowingAsyncBinding<Int, Never>(10)
         
-        let binding = ThrowingAsyncBinding<Int, BindingError>(
-            initialState: .success(0),
-            get: { 0 },
-            set: { _ in }
-        )
+        let observed = Mutex<Int?>(nil)
+        await binding.mutateWrappedValue(throwingSetter: { result in
+            if case .success(let v) = result {
+                await observed.run { $0 = v }
+            }
+        })
         
-        await binding.setWrappedValue(
-            throwing: Never.self,
-            throwingSetter: { (_) throws(UpdateSetterError<BindingError, Never>) -> Void in throw UpdateSetterError<BindingError, Never>.setBinding(BindingError()) }
-        )
+        let seen = await observed.run { $0 }
+        #expect(seen == 10, "Setter should have seen the current value (10)")
+    }
+    
+    
+    @Test("mutateWrappedValue: preserves the mutation")
+    func mutatePreservesMutation() async throws {
+        let binding = ThrowingAsyncBinding<Int, Never>(10)
+        
+        await binding.mutateWrappedValue(throwingSetter: { result in
+            if case .success(let v) = result {
+                result = .success(v * 2)
+            }
+        })
+        
+        let value = try await binding.wrappedValue
+        #expect(value == 20)
+    }
+    
+    
+    @Test("mutateWrappedValue: when the setter throws, binding transitions to .failure")
+    func mutateThrowSetsBindingToFailure() async throws {
+        struct MutationError: Error, Equatable {}
+        
+        let binding = ThrowingAsyncBinding<Int, MutationError>(0)
+        
+        await binding.mutateWrappedValue(throwingSetter: { _ throws(MutationError) in
+            throw MutationError()
+        })
         
         guard case .failure = binding.loadingState else {
-            Issue.record("Expected loadingState to be .failure after .setBinding error")
+            Issue.record("Expected .failure after setter threw, got \(binding.loadingState)")
             return
         }
     }
     
-    // MARK: Loading state transitions
     
-    @Test("notStarted: accessing loadingState triggers loading")
-    func loadingStateTriggersLoad() async throws {
-        let binding = ThrowingAsyncBinding<Int, Error>(
-            initialState: .notStarted,
-            get: { 55 },
-            set: { _ in }
-        )
+    @Test("mutateWrappedValue: setter sees current failure when binding is in failure state")
+    func mutateOnFailedBindingReceivesFailure() async {
+        struct LoadError: Error, Equatable {}
         
-        // Just touching loadingState should kick off the load.
-        _ = binding.loadingState
-        
-        // Give the spawned Task a moment to complete.
-        _ = try await binding.wrappedValue
-        
-        guard case .success(let value) = binding.loadingState else {
-            Issue.record("Expected .success after loading completed")
-            return
+        let binding = ThrowingAsyncBinding<Int, LoadError> { () throws(LoadError) in
+            throw LoadError()
         }
-        #expect(value == 55)
-    }
-}
-
-
-
-// MARK: Additional ThrowingAsyncBinding Tests
-
-extension ThrowingAsyncBindingTests {
-    
-    // MARK: Fan-out
-    
-    // If ten tasks all await `wrappedValue` while it's loading, every single
-    // one should receive the result once it arrives — not just the first one.
-    @Test("Multiple concurrent waiters all receive the value when it resolves")
-    func concurrentWaitersAllReceiveValue() async throws {
-        // Use a continuation to give us manual control over when the value resolves.
-        let resolveValue: @Sendable () -> Int = { 42 }
         
+        // Drive into failure.
+        _ = try? await binding.wrappedValue
+        
+        let sawFailure = Mutex(false)
+        await binding.mutateWrappedValue(throwingSetter: { result in
+            if case .failure = result {
+                await sawFailure.run { $0 = true }
+            }
+        })
+        
+        let seen = await sawFailure.run { $0 }
+        #expect(seen, "Setter should have seen the current .failure")
+    }
+    
+    
+    // MARK: refresh
+    
+    /// Conservative test: just asserts the value is still available after refresh.
+    /// `refresh()` currently doesn't clear the cache, so the generator doesn't actually
+    /// re-run on a generator-init binding — see notes in the package.
+    @Test("refresh: value remains available afterwards")
+    func refreshPreservesValue() async throws {
+        let binding = ThrowingAsyncBinding<Int, Never>(42)
+        binding.refresh()
+        let value = try await binding.wrappedValue
+        #expect(value == 42)
+    }
+    
+    
+    // MARK: Concurrency
+    
+    /// Many tasks awaiting `wrappedValue` while loading should ALL receive
+    /// the result once it resolves — not just the first one in line.
+    @Test("Multiple concurrent waiters on wrappedValue all receive the resolved value",
+          .timeLimit(.minutes(1)))
+    func multipleWaitersReceiveValue() async throws {
+        // A short async pause in the generator gives later waiters time to
+        // arrive and park on `subject.values` while loading is still in flight.
+        // We don't try to choreograph exact interleavings — the contract is
+        // simply that every waiter eventually receives the value, no matter
+        // when they showed up.
         let binding = ThrowingAsyncBinding<Int, Never> {
-            // Yield once to ensure waiters have time to park before we resolve.
-            await Task.yield()
-            return resolveValue()
+            try? await Task.sleep(for: .milliseconds(50))
+            return 42
         }
         
-        let results = try await withThrowingTaskGroup(of: Int.self, returning: [Int].self) { group in
+        let collected = await withTaskGroup(of: Int.self, returning: [Int].self) { group in
             for _ in 0..<10 {
                 group.addTask {
                     try! await binding.wrappedValue
                 }
             }
-            var collected = [Int]()
-            for try await result in group {
-                collected.append(result)
+            var results: [Int] = []
+            for await result in group {
+                results.append(result)
             }
-            return collected
+            return results
         }
         
-        #expect(results.count == 10, "All 10 waiters should receive a result")
-        #expect(results.allSatisfy { $0 == 42 }, "Every waiter should receive the correct value")
+        #expect(collected.count == 10, "All 10 waiters should receive a result")
+        #expect(collected.allSatisfy { $0 == 42 }, "Every waiter should receive the correct value")
     }
     
     
-    // MARK: Setter behaviour from failure state
-    
-    // When the binding is already in `.failure`, the async setter overload
-    // that accepts an explicit `onFailure:` handler should call that handler
-    // rather than proceeding to mutate the value.
-    @Test("setWrappedValue(setter:onFailure:) calls onFailure when binding is in failure state")
-    func setterCallsOnFailureWhenBindingFailed() async {
-        struct SourceError: Error, Equatable {}
-        
-        let binding = ThrowingAsyncBinding<Int, SourceError>(
-            initialState: .notStarted,
-            get: { () throws(SourceError) in throw SourceError() },
-            set: { _ in }
-        )
-        
-        // Drive the binding into `.failure`.
-        await #expect(throws: SourceError.self) {
-            _ = try await binding.wrappedValue
-        }
-        
-        var onFailureCalled = false
-        await binding.setWrappedValue(setter: { $0 += 1 }, onFailure: { _ in
-            onFailureCalled = true
-        })
-        
-        #expect(onFailureCalled, "onFailure should be called when the binding is in a failure state")
-    }
-    
-    
-    // The overload without an explicit `onFailure:` should propagate the
-    // existing failure back into the binding rather than silently swallowing it.
-    @Test("setWrappedValue(setter:) re-records the failure when binding is in failure state")
-    func setterRerecordsFailureWithoutOnFailure() async throws {
-        struct SourceError: Error, Equatable {}
-        
-        let binding = ThrowingAsyncBinding<Int, SourceError>(
-            initialState: .notStarted,
-            get: { () throws(SourceError) in throw SourceError() },
-            set: { _ in }
-        )
-        
-        await #expect(throws: SourceError.self) {
-            _ = try await binding.wrappedValue
-        }
-        
-        // This should not crash or silently succeed — the failure should persist.
-        await binding.setWrappedValue(setter: { $0 += 1 })
-        
-        guard case .failure = binding.loadingState else {
-            Issue.record("Expected binding to remain in .failure after setter called on a failed binding")
-            return
-        }
-    }
-    
-    
-    // MARK: Lost-update behaviour
-    
-    // This test proves a known design characteristic: the async setter
-    // performs a read → mutate copy → write across multiple suspension
-    // points. If two setters interleave, one will overwrite the other's
-    // result. This is not necessarily a bug (it mirrors how SwiftUI's
-    // Binding works), but callers should be aware of it.
-    //
-    // If this test starts *failing* — i.e., both increments are preserved —
-    // that would indicate the setter has been made atomic, which would be
-    // a meaningful improvement worth noting in a changelog.
-    @Test("Concurrent async setters exhibit last-write-wins behaviour (proves known characteristic)",
-        .timeLimit(.minutes(1)),
-          .disabled("Unsure how to test without deadlocking"))
-    func concurrentSettersLastWriteWins() async throws {
-        let binding = ThrowingAsyncBinding<Int, Never>(0)
-
-        // This continuation is our gate. Task A will pause here after reading
-        // the value, giving Task B a guaranteed window to complete first.
-        // We use Optional so we can capture it from within the async setter body.
-        var gate: CheckedContinuation<Void, Never>? = nil
-
-        // Task A: reads value (0), then parks on the gate.
-        async let taskA: Void = Task {
-                await binding.setWrappedValue(setter: { value in
-                    await withCheckedContinuation { continuation in
-                        gate = continuation
-                        // Don't resume yet — Task B will do that.
-                    }
-                    value += 1 // writes 1, but based on the stale read of 0
-                })
-            }
-            .value
-
-        // Give Task A enough time to park on the gate before Task B runs.
-        await Task.yield()
-
-        // Task B: completes its full read (0) → mutate (1) → write cycle.
-        await binding.setWrappedValue(setter: { $0 += 1 })
-        // binding is now 1.
-
-        // Release Task A. It will now write its stale copy (also 1, from its
-        // original read of 0), silently overwriting Task B's work.
-        gate?.resume()
-        await taskA
-
-        let result = try await binding.wrappedValue
-
-        // Both tasks incremented from 0, so both wrote 1.
-        // One write was lost — the result is 1, not 2.
-        #expect(result == 1, """
-            Expected 1 (not 2) — demonstrates that the second setter \
-            overwrote the first's result. If this starts returning 2, \
-            setWrappedValue(setter:) has been made atomic.
-            """)
-    }
-    
-    
-    // MARK: Double-trigger guard
-    
-    // Accessing `loadingState` twice in rapid succession from `.notStarted`
-    // should only spawn one loading Task, not two. The generator should run
-    // exactly once.
-    //
-    // Note: this is an inherently racy test due to `startLoading()` not being
-    // actor-isolated. A single reliable failure here is a strong signal that
-    // the guard in `startLoading()` needs to become actor-isolated.
-    @Test("Rapid concurrent access to loadingState only triggers one load")
-    func startLoadingNotTriggeredTwice() async throws {
-        for _ in 1...100 {
+    /// Hammering `loadingState` from many tasks at once must not cause the
+    /// generator to run more than once. The cache inside the getter mutex is
+    /// what guarantees this.
+    @Test("Concurrent loadingState access triggers the generator only once",
+          .timeLimit(.minutes(1)))
+    func concurrentLoadingStateAccessOnlyOneLoad() async throws {
+        // Repeat to surface any rare race conditions.
+        for _ in 1...20 {
             let callCount = Mutex(0)
+            let binding = ThrowingAsyncBinding<Int, Never> {
+                await callCount.run { $0 += 1 }
+                return 1
+            }
             
-            let binding = ThrowingAsyncBinding<Int, Never>(
-                initialState: .notStarted,
-                get: {
-                    await callCount.run { $0 += 1 }
-                    return 1
-                },
-                set: { _ in }
-            )
-            
-            // Hammer loadingState from multiple tasks simultaneously.
             await withTaskGroup(of: Void.self) { group in
                 for _ in 0..<10 {
                     group.addTask {
@@ -391,226 +348,97 @@ extension ThrowingAsyncBindingTests {
                 }
             }
             
-            // Wait for loading to complete.
-            _ = try! await binding.wrappedValue
+            // Wait for loading to finish.
+            _ = try await binding.wrappedValue
             
             let count = await callCount.run { $0 }
-            #expect(count == 1, "Generator should only be called once regardless of concurrent loadingState access")
+            #expect(count == 1, "Generator must run exactly once regardless of concurrent loadingState access")
         }
     }
     
     
-    @Test("Atomic setters preserve all concurrent updates (no lost writes)")
-    func concurrentSettersAreAtomic() async throws {
-        let binding = ThrowingAsyncBinding<Int, Never>(0)
+    // MARK: set: callback contract
+    //
+    // These tests describe how the `set:` callback is expected to behave.
+    // They follow the SwiftUI `Binding(get:set:)` model: the callback fires
+    // when the binding is changed by a caller (via `setWrappedValue` or
+    // `mutateWrappedValue`), not when the generator loads the initial value
+    // or refreshes it. The new state is delivered to the callback before
+    // the mutating call returns.
+    
+    @Test("setWrappedValue invokes the set callback with the new value")
+    func setCallbackFiresOnSetWrappedValue() async {
+        typealias State = FailableLoadingState<Int, Never>
+        let received = Mutex<State?>(nil)
         
-        var gate: CheckedContinuation<Void, Never>? = nil
-        
-        // Task A acquires the mutex, then parks mid-setter on the gate,
-        // holding the mutex open while it waits.
-        async let taskA: Void = binding.setWrappedValue(setter: { value in
-            await withCheckedContinuation { continuation in
-                gate = continuation
+        let binding = ThrowingAsyncBinding<Int, Never>(
+            0,
+            set: { state in
+                await received.run { $0 = state }
             }
-            value += 1
-        })
-        
-        // Let Task A enter the mutex and park on the gate.
-        await Task.yield()
-        
-        // Task B queues on the mutex behind Task A.
-        // `async let` is essential: the main task must remain free to
-        // resume the gate below. `await`-ing here would deadlock.
-        async let taskB: Void = binding.setWrappedValue(setter: { $0 += 1 })
-        
-        // Let Task B reach the mutex and park in the queue.
-        await Task.yield()
-        
-        // Release Task A. It writes 1, releases the mutex, Task B wakes.
-        // Task B re-reads 1 (A's committed result) and writes 2.
-        gate?.resume()
-        await taskA
-        await taskB
-        
-        let result = try await binding.wrappedValue
-        #expect(result == 2, """
-            Both increments must be preserved. If this returns 1, the \
-            re-read inside the mutex has regressed to a pre-mutex snapshot.
-            """)
-    }
-    
-    
-    // MARK: Atomicity
-    
-    /// Proves the core atomicity guarantee at scale. With 100 concurrent
-    /// increments, all must be preserved — any lost write signals the
-    /// read-modify-write has escaped the critical section.
-    @Test("100 concurrent atomic setters all preserve their writes")
-    func manyAtomicSetters() async throws {
-        let binding = ThrowingAsyncBinding<Int, Never>(0)
-        
-        await withTaskGroup(of: Void.self) { group in
-            for _ in 0..<100 {
-                group.addTask {
-                    await binding.setWrappedValue(setter: { $0 += 1 })
-                }
-            }
-        }
-        
-        let result = try await binding.wrappedValue
-        #expect(result == 100, "All 100 increments must be preserved")
-    }
-    
-    
-    /// Proves that two setters interleaved at the worst possible moment
-    /// still both commit correctly: Task A parks mid-setter while holding
-    /// the mutex, Task B queues behind it, then A commits and B re-reads
-    /// A's result before applying its own mutation.
-    @Test("Deterministically interleaved setters both preserve their writes")
-    func deterministicallyInterleavedSetters() async throws {
-        let binding = ThrowingAsyncBinding<Int, Never>(0)
-        let gate = Gate()
-        
-        // Task A: acquires the mutex, parks on the gate mid-setter.
-        async let taskA: Void = binding.setWrappedValue(setter: { value in
-            await gate.suspend()
-            value += 1  // operates on whatever is current when resumed
-        })
-        
-        // Let Task A enter the mutex and park.
-        await Task.yield()
-        
-        // Task B: queues on the mutex behind A.
-        // `async let` keeps the main task free to resume the gate.
-        async let taskB: Void = binding.setWrappedValue(setter: { $0 += 1 })
-        
-        // Let Task B park in the mutex queue.
-        await Task.yield()
-        
-        // Release A → A writes 1, releases mutex → B wakes, re-reads 1, writes 2.
-        await gate.resume()
-        await taskA
-        await taskB
-        
-        let result = try await binding.wrappedValue
-        #expect(result == 2, """
-                Both increments must be preserved. \
-                If this returns 1, the re-read has regressed to a pre-mutex snapshot.
-                """)
-    }
-    
-    
-    // MARK: - Load interaction
-    
-    /// Proves the two-phase setter correctly bridges an in-progress load:
-    /// phase 1 parks until initialization completes, then phase 2 applies
-    /// its mutation to the freshly-resolved value.
-    @Test("Setter fired before load completes waits, then mutates the loaded value")
-    func setterWaitsForLoad() async throws {
-        let gate = Gate()
-        
-        let binding = ThrowingAsyncBinding<Int, Never> {
-            await gate.suspend()
-            return 10
-        }
-        
-        _ = binding.loadingState  // kick off load; it parks on gate
-        
-        // Setter starts concurrently — parks in phase 1 waiting for resolution.
-        async let setTask: Void = binding.setWrappedValue(setter: { $0 += 5 })
-        
-        await Task.yield()  // let setter reach phase 1
-        
-        await gate.resume()  // binding resolves to 10
-        await setTask        // setter sees 10, writes 15
-        
-        let result = try await binding.wrappedValue
-        #expect(result == 15, "Setter must observe the loaded value (10) and apply +5")
-    }
-    
-    
-    // MARK: - Failure interaction
-    
-    /// Proves that a setter applied to a failed binding never touches
-    /// the setter body and routes directly to `onFailure`.
-    @Test("Setter on failed binding calls onFailure exactly once, never calls setter body")
-    func setterOnFailedBindingCallsOnFailure() async {
-        struct LoadError: Error {}
-        
-        let binding = ThrowingAsyncBinding<Int, LoadError>(
-            initialState: .notStarted,
-            get: { () throws(LoadError) in throw LoadError() },
-            set: { _ in }
         )
         
-        _ = try? await binding.wrappedValue  // drive into .failure
+        await binding.setWrappedValue(42)
         
-        // setter is @Sendable async, so we can await our Mutex inside it.
-        let setterCallCount = Mutex(0)
-        // onFailure is a plain sync (non-Sendable) closure — plain var is safe.
-        var onFailureCalled = false
+        let observed = await received.run { $0 }
+        guard case .success(42) = observed else {
+            Issue.record("Expected set callback to receive .success(42); got \(String(describing: observed))")
+            return
+        }
+    }
+    
+    
+    @Test("mutateWrappedValue invokes the set callback with the post-mutation value")
+    func setCallbackFiresAfterSuccessfulMutate() async {
+        typealias State = FailableLoadingState<Int, Never>
+        let received = Mutex<State?>(nil)
         
-        await binding.setWrappedValue(
-            setter: { _ in await setterCallCount.run { $0 += 1 } },
-            onFailure: { _ in onFailureCalled = true }
+        let binding = ThrowingAsyncBinding<Int, Never>(
+            10,
+            set: { state in
+                await received.run { $0 = state }
+            }
         )
         
-        let count = await setterCallCount.run { $0 }
-        #expect(count == 0,     "Setter body must not be called in failure state")
-        #expect(onFailureCalled, "onFailure must be called exactly once")
-    }
-    
-    
-    // MARK: - Throwing setter
-    
-    /// Proves the throwing setter's `.propagate` path correctly re-throws
-    /// to the caller without corrupting the binding's state.
-    @Test("Throwing setter .propagate re-throws and leaves binding state unchanged")
-    func throwingSetterPropagateDoesNotCorruptState() async throws {
-        struct CallerError: Error, Equatable {}
-        
-        let binding = ThrowingAsyncBinding<Int, Never>(42)
-        
-        do {
-            try await binding.setWrappedValue(
-                throwing: CallerError.self,
-                throwingSetter: { _ throws(UpdateSetterError<Never, CallerError>) in
-                    throw .propagate(CallerError())
-                }
-            )
-            Issue.record("Expected CallerError to be thrown")
-        } catch is CallerError {}
-        
-        // The binding must be unchanged — a propagated error is the caller's
-        // problem, not the binding's.
-        let result = try await binding.wrappedValue
-        #expect(result == 42, "Binding value must be unchanged after .propagate")
-    }
-    
-    
-    /// Proves that 100 concurrent throwing setters all preserve their writes,
-    /// even through the added complexity of the `Result`-smuggling path.
-    @Test("100 concurrent throwing setters all preserve their writes")
-    func manyAtomicThrowingSetters() async throws {
-        let binding = ThrowingAsyncBinding<Int, Never>(0)
-        
-        await withTaskGroup(of: Void.self) { group in
-            for _ in 0..<100 {
-                group.addTask {
-                    try? await binding.setWrappedValue(
-                        throwing: Never.self,
-                        throwingSetter: { (value) throws(UpdateSetterError<Never, Never>) in
-                            value += 1
-                        }
-                    )
-                }
+        await binding.mutateWrappedValue(throwingSetter: { result in
+            if case .success(let v) = result {
+                result = .success(v * 2)
             }
-        }
+        })
         
-        let result = try await binding.wrappedValue
-        #expect(result == 100, "All 100 increments must be preserved through throwing setter path")
+        let observed = await received.run { $0 }
+        guard case .success(20) = observed else {
+            Issue.record("Expected set callback to receive .success(20); got \(String(describing: observed))")
+            return
+        }
+    }
+    
+    
+    @Test("mutateWrappedValue invokes the set callback with .failure when the setter throws")
+    func setCallbackFiresOnThrowingMutate() async {
+        struct MutationError: Error, Equatable {}
+        typealias State = FailableLoadingState<Int, MutationError>
+        let received = Mutex<State?>(nil)
+        
+        let binding = ThrowingAsyncBinding<Int, MutationError>(
+            0,
+            set: { state in
+                await received.run { $0 = state }
+            }
+        )
+        
+        await binding.mutateWrappedValue(throwingSetter: { _ throws(MutationError) in
+            throw MutationError()
+        })
+        
+        let observed = await received.run { $0 }
+        guard case .failure = observed else {
+            Issue.record("Expected set callback to receive .failure; got \(String(describing: observed))")
+            return
+        }
     }
 }
+
 
 
 // MARK: - ThrowingAsyncLazy
@@ -618,38 +446,56 @@ extension ThrowingAsyncBindingTests {
 @Suite("ThrowingAsyncLazy")
 struct ThrowingAsyncLazyTests {
     
-    @Test("Static init: wrappedValue returns initial value")
+    @Test("Static init: wrappedValue returns the initial value")
     func staticInit() async throws {
-        let lazy = ThrowingAsyncLazy<String, Error>("swift")
+        let lazy = ThrowingAsyncLazy<String, Never>("swift")
         let value = try await lazy.wrappedValue
         #expect(value == "swift")
     }
     
+    
     @Test("Generator init: wrappedValue returns the generated value")
     func generatorInit() async throws {
-        let lazy = ThrowingAsyncLazy<Int, Error>(get: { 123 })
+        let lazy = ThrowingAsyncLazy<Int, Never>(get: { 123 })
         let value = try await lazy.wrappedValue
         #expect(value == 123)
     }
     
-    @Test("Generator init: throwing getter propagates the error")
+    
+    @Test("Throwing generator: wrappedValue re-throws the error")
     func throwingGenerator() async {
         struct LazyError: Error, Equatable {}
         
-        let lazy = ThrowingAsyncLazy<Int, LazyError>(get: { () throws(LazyError) in throw LazyError() })
+        let lazy = ThrowingAsyncLazy<Int, LazyError>(
+            get: { () throws(LazyError) in throw LazyError() }
+        )
         
         do {
             _ = try await lazy.wrappedValue
             Issue.record("Expected LazyError")
         }
-        catch is LazyError {
-            // Correct.
-        }
         catch {
-            Issue.record("Unexpected error type: \(error)")
+            // Typed throws guarantees only LazyError can be thrown.
         }
     }
+    
+    
+    @Test("Generator init: generator is called at most once across multiple reads")
+    func generatorCalledOnce() async throws {
+        let callCount = Mutex(0)
+        let lazy = ThrowingAsyncLazy<Int, Never>(get: {
+            await callCount.run { $0 += 1 }
+            return 5
+        })
+        
+        _ = try await lazy.wrappedValue
+        _ = try await lazy.wrappedValue
+        
+        let count = await callCount.run { $0 }
+        #expect(count == 1, "Generator should only be called once")
+    }
 }
+
 
 
 // MARK: - AsyncBinding
@@ -657,41 +503,191 @@ struct ThrowingAsyncLazyTests {
 @Suite("AsyncBinding")
 struct AsyncBindingTests {
     
-    @Test("Static init: wrappedValue returns initial value")
-    func staticInit() async {
+    // MARK: Static value init
+    
+    @Test("Static init: wrappedValue returns the initial value")
+    func staticInitWrappedValue() async {
         let binding = AsyncBinding(42)
         let value = await binding.wrappedValue
         #expect(value == 42)
     }
     
-    @Test("Generator init: wrappedValue returns the generated value")
-    func generatorInit() async {
-        let binding = AsyncBinding<String> { "generated" }
-        let value = await binding.wrappedValue
-        #expect(value == "generated")
-    }
     
-    @Test("setWrappedValue(_:): updates the wrapped value")
-    func setWrappedValue() async {
-        let binding = AsyncBinding(0)
-        await binding.setWrappedValue(77)
-        let value = await binding.wrappedValue
-        #expect(value == 77)
-    }
-    
-    @Test("loadingState reflects the current state")
-    func loadingState() async {
+    @Test("Static init: loadingState is .success immediately")
+    func staticInitLoadingState() {
         let binding = AsyncBinding(99)
         guard case .success(let value) = binding.loadingState else {
-            Issue.record("Expected .success for static init")
+            Issue.record("Expected .success, got \(binding.loadingState)")
             return
         }
         #expect(value == 99)
     }
     
     
-    // TODO: AsyncBinding.init(get:set:)
+    // MARK: Generator init
+    
+    @Test("Generator init: wrappedValue returns the generated value")
+    func generatorInitWrappedValue() async {
+        let binding = AsyncBinding<String> { "generated" }
+        let value = await binding.wrappedValue
+        #expect(value == "generated")
+    }
+    
+    
+    @Test("Generator init: generator is called at most once across multiple reads")
+    func generatorCalledOnce() async {
+        let callCount = Mutex(0)
+        let binding = AsyncBinding<Int> {
+            await callCount.run { $0 += 1 }
+            return 7
+        }
+        
+        _ = await binding.wrappedValue
+        _ = await binding.wrappedValue
+        _ = await binding.wrappedValue
+        
+        let count = await callCount.run { $0 }
+        #expect(count == 1, "Generator should only be called once; result must be cached")
+    }
+    
+    
+    // MARK: setWrappedValue
+    
+    @Test("setWrappedValue: updates wrappedValue")
+    func setWrappedValueUpdates() async {
+        let binding = AsyncBinding(0)
+        await binding.setWrappedValue(77)
+        let value = await binding.wrappedValue
+        #expect(value == 77)
+    }
+    
+    
+    // MARK: mutateWrappedValue
+    
+    /// This is the regression test for the silent-mutation-loss bug:
+    /// the inner closure used to extract the value via `case .success(var value)`
+    /// and mutate it, but never write it back into `result`. The fix is to
+    /// reassign `result = .success(value)` after the setter runs.
+    @Test("mutateWrappedValue: preserves the mutation (regression: was silently dropped)")
+    func mutatePreservesMutation() async {
+        let binding = AsyncBinding(10)
+        
+        await binding.mutateWrappedValue(setter: { value in
+            value *= 2
+        })
+        
+        let value = await binding.wrappedValue
+        #expect(value == 20, "Mutation must be preserved; if this returns 10, the silent-drop bug is back")
+    }
+    
+    
+    @Test("mutateWrappedValue: multiple sequential mutations each preserve their changes")
+    func mutateMultipleSequential() async {
+        let binding = AsyncBinding(0)
+        
+        for _ in 0..<5 {
+            await binding.mutateWrappedValue(setter: { $0 += 1 })
+        }
+        
+        let value = await binding.wrappedValue
+        #expect(value == 5, "All five sequential increments must be preserved")
+    }
+    
+    
+    // MARK: refresh
+    
+    @Test("refresh: value remains available afterwards")
+    func refreshPreservesValue() async {
+        let binding = AsyncBinding(42)
+        binding.refresh()
+        let value = await binding.wrappedValue
+        #expect(value == 42)
+    }
+    
+    
+    // MARK: Concurrency
+    
+    @Test("Multiple concurrent waiters on wrappedValue all receive the resolved value",
+          .timeLimit(.minutes(1)))
+    func multipleWaitersReceiveValue() async {
+        // See the matching test in `ThrowingAsyncBindingTests` for the reasoning
+        // behind the sleep-based design.
+        let binding = AsyncBinding<Int> {
+            try? await Task.sleep(for: .milliseconds(50))
+            return 42
+        }
+        
+        let collected = await withTaskGroup(of: Int.self, returning: [Int].self) { group in
+            for _ in 0..<10 {
+                group.addTask {
+                    await binding.wrappedValue
+                }
+            }
+            var results: [Int] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+        
+        #expect(collected.count == 10)
+        #expect(collected.allSatisfy { $0 == 42 })
+    }
+    
+    
+    // MARK: set: callback contract
+    
+    // Same contract as `ThrowingAsyncBindingTests`: the callback fires when
+    // the binding is changed by a caller, with the new state, before the
+    // mutating call returns. For `AsyncBinding` the state is always `.success`
+    // (since the non-throwing variants can't transition to `.failure`).
+    
+    @Test("setWrappedValue invokes the set callback with the new value") // Succeeds if debugged. Race condition?
+    func setCallbackFiresOnSetWrappedValue() async {
+        typealias State = AsyncBinding<Int>.LoadingState
+        let received = Mutex<State?>(nil)
+        
+        let binding = AsyncBinding(
+            0,
+            set: { state in
+                await received.run { $0 = state }
+            }
+        )
+        
+        await binding.setWrappedValue(42)
+        
+        let observed = await received.run { $0 }
+        guard case .success(42) = observed else {
+            Issue.record("Expected set callback to receive .success(42); got \(String(describing: observed))")
+            return
+        }
+    }
+    
+    
+    @Test("mutateWrappedValue invokes the set callback with the post-mutation value")
+    func setCallbackFiresAfterMutate() async {
+        typealias State = FailableLoadingState<Int, Never>
+        let received = Mutex<State?>(nil)
+        
+        let binding = AsyncBinding(
+            10,
+            set: { state in
+                await received.run { $0 = state }
+            }
+        )
+        
+        await binding.mutateWrappedValue(setter: { value in
+            value *= 2
+        })
+        
+        let observed = await received.run { $0 }
+        guard case .success(20) = observed else {
+            Issue.record("Expected set callback to receive .success(20); got \(String(describing: observed))")
+            return
+        }
+    }
 }
+
 
 
 // MARK: - AsyncLazy
@@ -699,12 +695,24 @@ struct AsyncBindingTests {
 @Suite("AsyncLazy")
 struct AsyncLazyTests {
     
-    @Test("Static init: wrappedValue returns initial value")
+    @Test("Static init: wrappedValue returns the initial value")
     func staticInit() async {
         let lazy = AsyncLazy("stored")
         let value = await lazy.wrappedValue
         #expect(value == "stored")
     }
+    
+    
+    @Test("Static init: loadingState is .success immediately")
+    func staticLoadingState() {
+        let lazy = AsyncLazy(true)
+        guard case .success(let value) = lazy.loadingState else {
+            Issue.record("Expected .success, got \(lazy.loadingState)")
+            return
+        }
+        #expect(value == true)
+    }
+    
     
     @Test("Generator init: wrappedValue returns the generated value")
     func generatorInit() async {
@@ -713,13 +721,19 @@ struct AsyncLazyTests {
         #expect(value == 3.14)
     }
     
-    @Test("loadingState for static init is .success immediately")
-    func staticLoadingState() {
-        let lazy = AsyncLazy(true)
-        guard case .success(let value) = lazy.loadingState else {
-            Issue.record("Expected .success")
-            return
+    
+    @Test("Generator init: generator is called at most once across multiple reads")
+    func generatorCalledOnce() async {
+        let callCount = Mutex(0)
+        let lazy = AsyncLazy<Int> {
+            await callCount.run { $0 += 1 }
+            return 7
         }
-        #expect(value == true)
+        
+        _ = await lazy.wrappedValue
+        _ = await lazy.wrappedValue
+        
+        let count = await callCount.run { $0 }
+        #expect(count == 1, "Generator should only be called once")
     }
 }

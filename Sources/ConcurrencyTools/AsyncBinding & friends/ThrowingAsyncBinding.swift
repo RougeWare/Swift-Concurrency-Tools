@@ -42,8 +42,10 @@ where Value: Sendable,
     @MutableSafePointer
     private var valueGenerator: ValueGenerator
     
-    /// If the dev wants to listen for changes with a callback, they set this on init
-    private var onDidChange: OnDidChange?
+//    /// If the dev wants to listen for changes with a callback, they set this on init
+//    private var onDidChange: OnDidChange?
+    
+    private var onDidChange_shim: Set<AnyCancellable> = []
     
     /// Guarantees exclusive access to getting the value
     private let getterMutex = Mutex()
@@ -63,7 +65,12 @@ where Value: Sendable,
     private init(subject: Subject, valueGenerator: ValueGenerator, set onDidChange: OnDidChange? = nil) {
         self.subject = subject
         self._valueGenerator = MutableSafePointer(to: valueGenerator)
-        self.onDidChange = onDidChange
+//        self.onDidChange = onDidChange
+        
+        subject.sink { newState in
+            Task { await onDidChange?(newState) }
+        }
+        .store(in: &onDidChange_shim)
     }
     
     
@@ -228,22 +235,6 @@ public extension ThrowingAsyncBinding {
     func refresh() {
         valueGenerator.reset()
         initializeInBackground()
-    }
-}
-
-
-
-// MARK: - API - listen for changes
-
-@available(macOS 12, *)
-@available(iOS 15, *)
-public extension ThrowingAsyncBinding {
-    
-    /// This publishes any/all changes to this binding's wrapped value/failure.
-    ///
-    /// - Note: Receiving this publisher won't affect the internal state of this binding; something must request the value (``wrappedValue``) or current loading state (``loadingState``) in order for loading to start.
-    var publisher: Publisher {
-        subject.eraseToAnyPublisher()
     }
 }
 

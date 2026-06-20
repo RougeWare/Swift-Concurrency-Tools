@@ -75,19 +75,3 @@ public extension AsyncLazy {
         return storage.loadingState
     }
 }
-
-
-
-// MARK: - API - listen for changes
-
-@available(macOS 12, *)
-@available(iOS 15, *)
-public extension AsyncLazy {
-    
-    /// This publishes any/all changes to this binding's wrapped value.
-    ///
-    /// - Note: Receiving this publisher won't affect the internal state of this binding; something must request the value (``wrappedValue``) or current loading state (``loadingState``) in order for loading to start.
-    var publisher: Publisher {
-        storage.publisher
-    }
-}
