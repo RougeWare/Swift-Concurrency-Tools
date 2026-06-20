@@ -2,7 +2,7 @@
 //  resync.swift
 //  Plural Diagramming
 //
-//  Created by The Northstar✨ System on 2023-01-17.
+//  Created by Ky on 2023-01-17.
 //
 
 import Foundation
@@ -69,7 +69,7 @@ public func resync<Value>(_ asyncFunction: @escaping @Sendable () async -> Value
     
     let result = MutableSafePointer<Optional<Value>>(to: .none)
     
-    Task.detached(priority: .high) {
+    Task.immediateDetached(priority: .userInitiated) {
         defer {
             semaphore.signal()
         }
@@ -95,5 +95,15 @@ public func resync<Value>(_ asyncFunction: @escaping @Sendable () async -> Value
 struct TaskNeverExecutedError: LocalizedError {
     var errorDescription: String? {
         "Attempted to run a background task, but the task didn't finish as expected"
+    }
+    
+    
+    var recoverySuggestion: String? {
+        "File a bug report and be sure to include whatever makes your setup different from the unit tests in this package."
+    }
+    
+    
+    var helpAnchor: String? {
+        "https://github.com/RougeWare/Swift-Concurrency-Tools/issues/new/choose"
     }
 }

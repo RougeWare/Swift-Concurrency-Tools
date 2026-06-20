@@ -2,7 +2,7 @@
 //  Task sugar Tests.swift
 //  ConcurrencyTools
 //
-//  Created by Northstar✨System on 2023-05-22.
+//  Created by Ky on 2023-05-22.
 //  Migrated to Swift Testing on 2026-05-14.
 //
 

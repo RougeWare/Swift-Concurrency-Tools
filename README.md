@@ -287,4 +287,6 @@ The following LLMs were directed to assist with some parts of this package:
 - Claude 4.7 Opus
 - GPT-OSS
 
-These LLMs were never given direct access to the files in this package. They were directed by providing contexts and goals in web chats, and their responses were used to inform how this package was written. All code was critically inspected & reviewed by the package maintainers, regardless of how that code was written.
+These LLMs were never given direct access to the files in this package. They were directed by providing contexts and goals in web chats, and their responses were used to inform how this package was written. All code was typed, critically inspected, & reviewed directly by the package maintainers, regardless of how that code was written.
+
+If you find any issues whatsoever, please [report them as soon as you can](https://github.com/RougeWare/Swift-Concurrency-Tools/issues/new/choose).

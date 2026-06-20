@@ -68,7 +68,9 @@ where Value: Sendable,
 //        self.onDidChange = onDidChange
         
         subject.sink { newState in
-            Task { await onDidChange?(newState) }
+            resync {
+                await onDidChange?(newState)
+            }
         }
         .store(in: &onDidChange_shim)
     }

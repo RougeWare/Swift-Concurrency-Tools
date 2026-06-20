@@ -2,7 +2,7 @@
 //  onMainActor.swift
 //  Homebrew App Store
 //
-//  Created by The Northstar✨ System on 2023-03-14.
+//  Created by Ky on 2023-03-14.
 //
 
 import Foundation

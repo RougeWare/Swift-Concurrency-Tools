@@ -642,7 +642,7 @@ struct AsyncBindingTests {
     // mutating call returns. For `AsyncBinding` the state is always `.success`
     // (since the non-throwing variants can't transition to `.failure`).
     
-    @Test("setWrappedValue invokes the set callback with the new value") // Succeeds if debugged. Race condition?
+    @Test("setWrappedValue invokes the set callback with the new value")
     func setCallbackFiresOnSetWrappedValue() async {
         typealias State = AsyncBinding<Int>.LoadingState
         let received = Mutex<State?>(nil)
@@ -650,7 +650,7 @@ struct AsyncBindingTests {
         let binding = AsyncBinding(
             0,
             set: { state in
-                await received.run { $0 = state }
+                await received.run { $0 = .init(state) }
             }
         )
         

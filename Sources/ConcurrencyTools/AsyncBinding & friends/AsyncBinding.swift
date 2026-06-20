@@ -74,7 +74,7 @@ public extension AsyncBinding {
     ///
     /// This automatically starts loading if it's not yet started. If you need to peek at the current state without starting to load it, use ``publisher``
     var loadingState: LoadingState {
-        storage.loadingState
+        LoadingState(storage.loadingState)
     }
 }
 

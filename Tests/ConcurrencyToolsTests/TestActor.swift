@@ -2,7 +2,7 @@
 //  TestActor.swift
 //  ConcurrencyTools
 //
-//  Created by Northstar✨System on 2023-05-22.
+//  Created by Ky on 2023-05-22.
 //  Updated for Swift 6 strict concurrency on 2026-05-14.
 //
 
