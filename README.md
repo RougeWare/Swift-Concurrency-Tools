@@ -162,19 +162,22 @@ print("Grand total resource count: \(await counter.run { $0 })")
 
 
 
-## `Gate`
+## `Pool`
 
-You can think of this as a limited version of a semaphore, built entirely on structured concurrency concepts
+You can think of this as a limited version of a semaphore, allowing up to a maximum number of parallel operations and never more.
 
 ```swift
-let gate = Gate()
+let downloads = Pool(maximumPermits: 4)
 
-Task {
-    await doLotsOfWork()
-    gate.resume()
+await withTaskGroup(of: Void.self) { group in
+    for resource in resources {
+        group.addTask {
+            await downloads.borrowPermit { // pauses before downloading if 4 permits are already checked out
+                try? await resource.asyncDownload()
+            } // the permit is freed here, just as the operation finishes
+        }
+    }
 }
-
-await gate.suspend()
 ```
 
 

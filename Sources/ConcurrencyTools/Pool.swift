@@ -27,7 +27,7 @@
 ///         group.addTask {
 ///             await downloads.borrowPermit { // pauses before downloading if 4 permits are already checked out
 ///                 try? await resource.asyncDownload()
-///             } // the permit is freed here, as the operation finishes
+///             } // the permit is freed here, just as the operation finishes
 ///         }
 ///     }
 /// }
