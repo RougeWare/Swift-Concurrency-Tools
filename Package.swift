@@ -7,8 +7,8 @@ let package = Package(
     name: "ConcurrencyTools",
     
     platforms: [
-        .iOS(.v13),
-        .macOS(.v10_15),
+        .iOS(.v26),
+        .macOS(.v26),
     ],
     
     products: [
