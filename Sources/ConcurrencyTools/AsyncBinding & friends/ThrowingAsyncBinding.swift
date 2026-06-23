@@ -62,7 +62,7 @@ where Value: Sendable,
         self._valueGenerator = MutableSafePointer(to: valueGenerator)
         
         subject.sink { newState in
-            resync {
+            Task.immediateDetached(priority: Task.currentPriority) {
                 await onDidChange?(newState)
             }
         }
