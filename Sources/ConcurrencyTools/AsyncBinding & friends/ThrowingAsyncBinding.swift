@@ -283,8 +283,8 @@ private extension ThrowingAsyncBinding {
     /// Immedaitely updates this binding to hold the given value
     private func update(toValue newValue: Value) async{
         let newState = LoadingState.success(newValue)
-        subject.send(newState)              // still feeds `wrappedValue`'s waiter + any future `publisher`
-        await onDidChange?(newState)        // awaited: blocks no thread, completes before the caller resumes
+        subject.send(newState)
+        await onDidChange?(newState)
     }
     
     
