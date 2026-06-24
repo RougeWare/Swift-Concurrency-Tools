@@ -27,7 +27,6 @@ where Value: Sendable,
     public typealias OnDidChange = @Sendable (LoadingState) async -> Void
     public typealias ThrowingMutateWrappedValue = @Sendable (inout Result) async throws(Failure) -> Void
     public typealias SetWrappedValue = @Sendable (inout Value) async -> Void
-    public typealias Publisher = AnyPublisher<LoadingState, Never>
     
     private typealias Subject = CurrentValueSubject<LoadingState, Never>
     
@@ -40,7 +39,8 @@ where Value: Sendable,
     @MutableSafePointer
     private var valueGenerator: ValueGenerator
     
-    private var onDidChange_shim: Set<AnyCancellable> = []
+    /// Called when the value inside this binding changes
+    private let onDidChange: OnDidChange?
     
     /// Guarantees exclusive access to getting the value
     private let getterMutex = Mutex()
@@ -56,17 +56,11 @@ where Value: Sendable,
     /// - Parameters:
     ///   - subject:        Tracks & reports the loading of the bound value
     ///   - valueGenerator: Generates (and responds to changes of) the bound value
-    ///   - onDidChange:    _optional_ - If you prefer to use callbacks instead of publishers to listen for changes, provide one here. Otherwise, subscribe to ``publisher``
+    ///   - onDidChange:    _optional_ - Use this to listen for changes to this binding. Ideally this updates the source-of-truth reactively based on each change
     private init(subject: Subject, valueGenerator: ValueGenerator, set onDidChange: OnDidChange? = nil) {
         self.subject = subject
         self._valueGenerator = MutableSafePointer(to: valueGenerator)
-        
-        subject.sink { newState in
-            Task.immediateDetached(priority: Task.currentPriority) {
-                await onDidChange?(newState)
-            }
-        }
-        .store(in: &onDidChange_shim)
+        self.onDidChange = onDidChange
     }
     
     
@@ -76,7 +70,7 @@ where Value: Sendable,
     ///
     /// - Parameters:
     ///   - initialValue: The initial value to be immediately available of this binding.
-    ///   - onDidChange:  _optional_ - If you prefer to use callbacks instead of publishers to listen for changes, provide one here. Otherwise, subscribe to ``publisher``
+    ///   - onDidChange:  _optional_ - Use this to listen for changes to this binding. Ideally this updates the source-of-truth reactively based on each change
     public init(_ initialValue: Value, set onDidChange: OnDidChange? = nil) {
         let initialResult = Result.success(initialValue)
         self.init(subject: Subject(.init(initialResult)),
@@ -89,7 +83,7 @@ where Value: Sendable,
     ///
     /// - Parameters:
     ///   - get:         Generates the value that this binds. This is only called when it hasn't been called before.
-    ///                  If this throws an error, that error is stored and re-thrown every time ``wrappedValue`` is called until/unless a success value is written to this binding using ``mutateWrappedValue(throwingSetter:)``, ``setWrappedValue(_:)``, or by calling ``refresh()`` when this `get` is prepared to return a success value..
+    ///                  If this throws an error, that error is stored and re-thrown every time ``wrappedValue`` is called, until/unless a success value is written to this binding using ``mutateWrappedValue(throwingSetter:)``, ``setWrappedValue(_:)``, or by calling ``refresh()`` when this `get` is prepared to return a success value..
     ///   - onDidChange: _optional_ - If you prefer to use callbacks instead of publishers to listen for changes, provide one here. Otherwise, subscribe to ``publisher``
     public init(_ get: @escaping Get, set onDidChange: OnDidChange? = nil) {
         self.init(subject: Subject(.notStarted),
@@ -184,10 +178,10 @@ public extension ThrowingAsyncBinding {
             do {
                 var result = result
                 try await throwingSetter(&result)
-                update(toValue: try result.get())
+                await update(toValue: try result.get())
             }
             catch let error as Failure { // boilerplate necessary due to https://github.com/swiftlang/swift/issues/87556
-                update(toFailure: error)
+                await update(toFailure: error)
             }
             catch {
                 assertionFailure("Unexpected error: \(error)")
@@ -208,7 +202,7 @@ public extension ThrowingAsyncBinding {
     /// - Parameter newValue: The new value to hold within this binding
     nonmutating func setWrappedValue(_ newValue: Value) async {
         await setterMutex.run {
-            update(toValue: newValue)
+            await update(toValue: newValue)
         }
     }
 }
@@ -272,10 +266,10 @@ private extension ThrowingAsyncBinding {
         @Sendable func swift_issue_87556(_ get: @escaping Get) async {
             subject.send(.loading)
             do {
-                update(toValue: try await get())
+                await update(toValue: try await get())
             }
             catch {
-                update(toFailure: error)
+                await update(toFailure: error)
             }
         }
         
@@ -287,14 +281,18 @@ private extension ThrowingAsyncBinding {
     
     
     /// Immedaitely updates this binding to hold the given value
-    private func update(toValue newValue: Value) {
-        subject.send(.success(newValue))
+    private func update(toValue newValue: Value) async{
+        let newState = LoadingState.success(newValue)
+        subject.send(newState)              // still feeds `wrappedValue`'s waiter + any future `publisher`
+        await onDidChange?(newState)        // awaited: blocks no thread, completes before the caller resumes
     }
     
     
     /// Immedaitely updates this binding to hold the given failure
-    private func update(toFailure newFailure: Failure) {
-        subject.send(.failure(newFailure))
+    private func update(toFailure newFailure: Failure) async {
+        let newState = LoadingState.failure(newFailure)
+        subject.send(newState)
+        await onDidChange?(newState)
     }
     
     

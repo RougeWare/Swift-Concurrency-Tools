@@ -19,7 +19,6 @@ where Value: Sendable,
     public typealias Result = BindingAnalog.Result
     public typealias LoadingState = BindingAnalog.LoadingState
     public typealias Get = BindingAnalog.Get
-    public typealias Publisher = BindingAnalog.Publisher
     
     
     
